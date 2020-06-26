@@ -27,12 +27,11 @@ install:
   - python3 -m pip install -U pip
   - python3 -m easy_install -U setuptools
   - python3 -m pip install pytest-cov
-  - python3 -m pip install scipy astropy healpy cython
-  - python3 -m pip install oldest-supported-numpy -I --no-deps --no-cache-dir --ignore-installed -vvv
   - python3 -m pip install cibuildwheel==1.5.1
 
 script:
   - python3 setup.py build_ext -i
+  - pip install .
   - py.test --cov=pixell pixell/tests/ -s
   - find . -type f -iname '*.so' -print -delete
   - rm -rf _deps/
