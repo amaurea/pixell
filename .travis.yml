@@ -17,7 +17,7 @@ env:
   global:
     - TWINE_USERNAME=__token__
     # Note: TWINE_PASSWORD is set to an API token in Travis settings
-    - CIBW_BEFORE_BUILD="pip3 install -U cython && export $pyv=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))') && if [[ $pyv>=3.7 ]] ; then pip3 install numpy==1.14.3 -I ; else pip3 install numpy==1.13.3 -I ; fi"
+    - CIBW_BEFORE_BUILD="pip3 install -U cython && export $pyv=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))') && if [ 1 -eq \"$(echo \"${pyv} >= 3.7\" | bc)\"  ] ; then pip3 install numpy==1.14.3 -I ; else pip3 install numpy==1.13.3 -I ; fi"
     - CIBW_TEST_COMMAND_LINUX="test-pixell"
     - CIBW_BUILD_VERBOSITY=3
     - CIBW_BUILD="cp3?-*x86_64"
