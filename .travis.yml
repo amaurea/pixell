@@ -17,7 +17,7 @@ env:
   global:
     - TWINE_USERNAME=__token__
     # Note: TWINE_PASSWORD is set to an API token in Travis settings
-    - CIBW_BEFORE_BUILD="pip3 install -U cython && pip3 install numpy --no-cache-dir && pip3 install scipy --no-cache-dir && pip3 install oldest-supported-numpy -I --no-deps --no-cache-dir --ignore-installed && pip cache purge "
+    - CIBW_BEFORE_BUILD="pip3 install -U cython && pip3 install numpy --no-cache-dir && pip3 install scipy --no-cache-dir && pip3 install oldest-supported-numpy -I --no-deps --no-cache-dir --ignore-installed -vvv && pip cache purge "
     - CIBW_TEST_COMMAND_LINUX="test-pixell"
     - CIBW_BUILD_VERBOSITY=3
     - CIBW_BUILD="cp3?-*x86_64"
