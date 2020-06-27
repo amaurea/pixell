@@ -66,7 +66,17 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
+"""
+Because the numpy ABI doesn't maintain
+forward compatibility, when building wheels
+on CI, we have to choose the oldest numpy version
+available for the Python version in use.
 
+Using old versions of numpy will cause scipy
+and astropy to complain, so on CI, we skip
+scipy and astropy and install them after building
+but before testing.
+"""
 NUMPY_VERSION=">=1.16" # Default numpy requirement
 bdeps = []
 if os.environ.get('CIBUILDWHEEL') or os.environ.get('TRAVIS'):
@@ -74,7 +84,7 @@ if os.environ.get('CIBUILDWHEEL') or os.environ.get('TRAVIS'):
     py_version = ".".join(map(str, sys.version_info[:2]))
     np_version = vdict[py_version]
     NUMPY_VERSION = f"=={np_version}"
-    bdeps = ['astropy','scipy']
+    bdeps = ['astropy','scipy'] # the deps we want to skip on CI
     
 requirements =  [f'numpy{NUMPY_VERSION}',
                  'astropy>=2.0',
@@ -91,15 +101,17 @@ requirements =  [f'numpy{NUMPY_VERSION}',
                  'coveralls>=1.5',
                  'pytest>=4.6']
 
-nreqs = []
-for req in requirements:
-    bad = False
-    for bdep in bdeps:
-        if bdep in req: bad = True
-    if not(bad): nreqs.append(req)
-    
-requirements = list(nreqs)
+# Filter out the skipped requirements
+def filter_reqs(reqs,bdeps):
+    nreqs = []
+    for req in reqs:
+        bad = False
+        for bdep in bdeps:
+            if bdep in req: bad = True
+        if not(bad): nreqs.append(req)
+    return list(nreqs)
 
+requirements = filter_reqs(requirements,bdeps)
 
 test_requirements = ['pip>=9.0',
                      'bumpversion>=0.5.',
@@ -121,7 +133,9 @@ test_requirements = ['pip>=9.0',
                      'pytest-cov>=2.6',
                      'coveralls>=1.5',
                      'pytest>=4.6']
-    
+
+
+test_requirements = filter_reqs(test_requirements,bdeps)
     
     
 
