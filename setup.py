@@ -93,7 +93,11 @@ requirements =  [f'numpy{NUMPY_VERSION}',
 
 nreqs = []
 for req in requirements:
-    if not(req in bdeps): nreqs.append(req)
+    bad = False
+    for bdep in bdeps:
+        if bdep in req: bad = True
+    if not(bad): nreqs.append(req)
+    
 requirements = list(nreqs)
 
 
