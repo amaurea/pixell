@@ -149,7 +149,8 @@ def prebuild():
 
 class CustomBuild(build_ext):
     def run(self):
-        print("Running build...")
+        py_version = ".".join(map(str, sys.version_info[:2]))
+        print(f"Running build with numpy version {np.__version__} and python version {py_version}... ")
         prebuild()
         # Then let setuptools do its thing.
         return build_ext.run(self)
