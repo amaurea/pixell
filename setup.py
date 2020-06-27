@@ -136,7 +136,8 @@ test_requirements = ['pip>=9.0',
 
 
 test_requirements = filter_reqs(test_requirements,bdeps)
-    
+print("REQUIREMENTS: ", requirements)    
+print("TEST_REQUIREMENTS: ", test_requirements)    
     
 
 fcflags = os.getenv('FCFLAGS')
@@ -161,21 +162,7 @@ def prebuild():
             sp.check_call('scripts/install_libsharp.sh', shell=True)
         except sp.CalledProcessError:
             raise DistutilsError('Failed to install libsharp.')
-        
-    # Handle cythonization to create sharp.c, etc.
-    no_cython = sp.call('cython --version',shell=True)
-    if no_cython:
-        try:
-            print("Cython not found. Attempting a conda install first.")
-            import conda.cli
-            conda.cli.main('conda', 'install',  '-y', 'cython')
-        except:
-            try:
-                print("conda install of cython failed. Attempting a pip install.")
-                pip_install("cython")
-            except:
-                raise DistutilsError('Cython not found and all attempts at installing it failed. User intervention required.')
-        
+                
     if sp.call('make -C cython',  shell=True) != 0:
         raise DistutilsError('Failure in the cython pre-build step.')
 
