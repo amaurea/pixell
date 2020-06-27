@@ -79,7 +79,7 @@ but before testing.
 """
 NUMPY_VERSION=">=1.16" # Default numpy requirement
 bdeps = []
-if os.environ.get('CIBUILDWHEEL') or os.environ.get('TRAVIS'):
+if os.environ.get('CIBUILDWHEEL'):
     vdict = {"3.6":"1.13.3","3.7":"1.14.5","3.8":"1.17.3"}
     py_version = ".".join(map(str, sys.version_info[:2]))
     np_version = vdict[py_version]
