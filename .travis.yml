@@ -34,7 +34,7 @@ script:
   - python scripts/install_numpy.py
   - python3 setup.py build_ext -i
   - python3 setup.py install
-  - "pip3 install -U numpy astropy scipy --ignore-installed --no-dependencies"
+  - "pip3 install -U numpy astropy scipy matplotlib --ignore-installed --no-dependencies"
   - py.test --cov=pixell pixell/tests/ -s
   - find . -type f -iname '*.so' -print -delete
   - rm -rf _deps/

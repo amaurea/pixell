@@ -84,7 +84,7 @@ if os.environ.get('CIBUILDWHEEL') or os.environ.get('TRAVIS'):
     py_version = ".".join(map(str, sys.version_info[:2]))
     np_version = vdict[py_version]
     NUMPY_VERSION = f"=={np_version}"
-    bdeps = ['astropy','scipy'] # the deps we want to skip on CI
+    bdeps = ['astropy','scipy', 'matplotlib'] # the deps we want to skip on CI
     
 requirements =  [f'numpy{NUMPY_VERSION}',
                  'astropy>=2.0',
