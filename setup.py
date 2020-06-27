@@ -73,7 +73,7 @@ if os.environ.get('CIBUILDWHEEL') or os.environ.get('TRAVIS'):
     py_version = ".".join(map(str, sys.version_info[:2]))
     np_version = vdict[py_version]
     NUMPY_VERSION = f"=={np_version}"
-    
+    bdeps = ['astropy','scipy']
     
 requirements =  [f'numpy{NUMPY_VERSION}',
                  'astropy>=2.0',
@@ -89,6 +89,11 @@ requirements =  [f'numpy{NUMPY_VERSION}',
                  'pytest-cov>=2.6',
                  'coveralls>=1.5',
                  'pytest>=4.6']
+
+nreqs = []
+for req in requirements:
+    if not(req in bdeps): nreqs.append(req)
+requirements = list(nreqs)
 
 
 test_requirements = ['pip>=9.0',
