@@ -66,7 +66,16 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements =  ['numpy>=1.16',
+
+NUMPY_VERSION=">=1.16" # Default numpy requirement
+if os.environ.get('CIBUILDWHEEL'):
+    vdict = {"3.6":"1.13.3","3.7":"1.14.5","3.8":"1.17.3"}
+    py_version = ".".join(map(str, sys.version_info[:2]))
+    np_version = vdict[py_version]
+    NUMPY_VERSION = f"=={np_version}"
+    
+    
+requirements =  [f'numpy{NUMPY_VERSION}',
                  'astropy>=2.0',
                  'setuptools>=39',
                  'h5py>=2.7<=2.10',
@@ -90,7 +99,7 @@ test_requirements = ['pip>=9.0',
                      'coverage>=4.5',
                      'Sphinx>=1.7',
                      'twine>=1.10',
-                     'numpy>=1.16',
+                     f'numpy{NUMPY_VERSION}',
                      'astropy>=2.0',
                      'setuptools>=39.2',
                      'h5py>=2.7<=2.10',

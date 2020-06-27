@@ -31,6 +31,7 @@ install:
   - python3 -m pip install cibuildwheel==1.5.1
 
 script:
+  - python scripts/install_numpy.py
   - python3 setup.py build_ext -i
   - pip install .
   - py.test --cov=pixell pixell/tests/ -s
