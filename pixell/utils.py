@@ -515,44 +515,128 @@ def dedup(a):
 	The original is not modified."""
 	return a[np.concatenate([[True],a[1:]!=a[:-1]])]
 
-def interpol(a, inds, order=3, mode="nearest", mask_nan=False, cval=0.0, prefilter=True):
-	"""Given an array a[{x},{y}] and a list of float indices into a,
-	inds[len(y),{z}], returns interpolated values at these positions as [{x},{z}]."""
-	a    = np.asanyarray(a)
+def interpol(arr, inds, out=None, mode="spline", border="nearest",
+		order=3, cval=0.0, epsilon=None):
+	"""Given an array arr[{x},{y}] and a list of float indices into a,
+	inds[len(y),{z}], returns interpolated values at these positions as [{x},{z}].
+
+	The mode and order arguments control the interpolation type. These can be:
+	* mode=="nn"  or (mode=="spline" and order==0): Nearest neighbor interpolation
+	* mode=="lin" or (mode=="spline" and order==1): Linear interpolation
+	* mode=="cub" or (mode=="spline" and order==3): Cubic interpolation
+	* mode=="fourier": Non-uniform fourier interpolation
+
+	The border argument controls the boundary condition. This does not apply
+	for fourier interpolation, which always assumes periodic boundary.
+	Valid values are:
+	* "nearest": Indices outside the array use the value from the nearest
+	  point on the edge.
+	* "cyclic": Periodic boundary conditions
+	* "mirrored": Mirrored boundary conditions
+	* "constant": Use a constant value, given by the cval argument
+
+	Epsilon controls the target relative accuracy of the interpolation.
+	Only applies to fourier interpolation. Spline interpolation is
+	overall much less accurate (assuming a band-limited true signal),
+	and its accuracy can't be controlled, but roughly corresponds to 1e-3.
+	Defaults to 1e-6 for single precision and 1e-15 for double precision
+	arrays.
+
+	Compatibility notes:
+	* mask_nan is no longer supported. You must implement this yourself
+	  if you need it. Do this something like
+	   mask = ~np.isfinite(arr)
+	   out  = interpol(arr, inds, ...)
+	   omask= interpol(mask, inds, mode="nn")
+	   out[omask!=0] = np.nan
+	* prefilter is no longer supported. This argument let the interpolation
+	  skip a heavy prefiltering step if the array was already filtered.
+	  This was useful, but assumed that the precomputed array was the same
+	  shape and data type as the array to be implemented, which is not the
+	  case for fourier interpolation. This functionality was replaced by
+	  interpolator objects returned by utils.interpolator, which are what's
+	  used to implement this function.
+	"""
+	arr  = np.asanyarray(arr)
 	inds = np.asanyarray(inds)
-	inds_orig_nd = inds.ndim
-	if inds.ndim == 1: inds = inds[:,None]
+	npre = arr.ndim - len(inds)
+	ip   = interpolator(arr, npre, mode=mode, border=border, order=order,
+			cval=cval, epsilon=epsilon)
+	return ip(inds, out=out)
 
-	npre = a.ndim - inds.shape[0]
-	res = np.empty(a.shape[:npre]+inds.shape[1:],dtype=a.dtype)
-	fa, fr = partial_flatten(a, range(npre,a.ndim)), partial_flatten(res, range(npre, res.ndim))
-	if mask_nan:
-		mask = ~np.isfinite(fa)
-		fa[mask] = 0
-	for i in range(fa.shape[0]):
-		fr[i].real = scipy.ndimage.map_coordinates(fa[i].real, inds, order=order, mode=mode, cval=cval, prefilter=prefilter)
-		if np.iscomplexobj(fa[i]):
-			fr[i].imag = scipy.ndimage.map_coordinates(fa[i].imag, inds, order=order, mode=mode, cval=cval, prefilter=prefilter)
-	if mask_nan and np.sum(mask) > 0:
-		fmask = np.empty(fr.shape,dtype=bool)
-		for i in range(mask.shape[0]):
-			fmask[i] = scipy.ndimage.map_coordinates(mask[i], inds, order=0, mode=mode, cval=cval, prefilter=prefilter)
-		fr[fmask] = np.nan
-	if inds_orig_nd == 1: res = res[...,0]
-	return res
+def interpolator(arr, npre=0, mode="spline", border="nearest", order=3, cval=0.0,
+		epsilon=None):
+	"""Construct an interpolator object that can be used to quickly interpolate
+	many positions in some array arr. Wrapper for the underlying SplineInterpolator
+	and FourierInterpolator classes. Used to implement the interpolate function.
+	See it for argument details."""
+	mode, order = _ip_get_mode(mode, order)
+	if mode == "spline":
+		return SplineInterpolator(arr, npre=npre, mode=mode, border=border,
+				order=order, cval=cval)
+	elif mode == "fourier":
+		return FourierInterpolator(arr, npre=npre, epsilon=epsilon)
+	else:
+		raise ValueError("Unrecognized interpolation mode '%s'" % str(mode))
 
-def interpol_prefilter(a, npre=None, order=3, inplace=False, mode="nearest"):
-	if order < 2: return a
-	a = np.asanyarray(a)
-	if not inplace: a = a.copy()
-	if npre is None: npre = max(0,a.ndim - 2)
-	if npre < 0:     npre = a.ndim-npre
-	# spline_filter was looping through the enmap pixel by pixel with getitem.
-	# Not using flatview got around it, but I don't understand why it happend
-	# in the first place.
-	for I in nditer(a.shape[:npre]):
-		a[I] = scipy.ndimage.spline_filter(a[I], order=order, mode=mode)
-	return a
+class SplineInterpolator:
+	prefiltered = True
+	def __init__(self, arr, npre=0, mode="spline", border="nearest", order=3, cval=0.0):
+		self.mode, self.order = _ip_get_mode(mode, order)
+		self.npre = npre % arr.ndim
+		self.cval = cval
+		self.border = border
+		if self.mode != "spline": raise ValueError("Unrecognized spline interpolation mode '%s'" % str(mode))
+		arr = np.asanyarray(arr)
+		if self.order > 1:
+			arr = arr.copy()
+			for I in nditer(arr.shape[:npre]):
+				arr[I] = scipy.ndimage.spline_filter(arr[I], order=self.order, mode=self.border)
+		self.arr = arr
+	def __call__(self, inds, out=None):
+		inds, out = _ip_prepare(self, inds, out=out)
+		# Do the actual interpolation
+		for I in nditer(self.arr.shape[:self.npre]):
+			out[I] = scipy.ndimage.map_coordinates(self.arr[I], inds, order=self.order,
+				mode=self.border, cval=self.cval, prefilter=False)
+		return out
+
+class FourierInterpolator:
+	prefiltered = False
+	def __init__(self, arr, npre=0, epsilon=None):
+		from . import fft
+		self.npre = npre % arr.ndim
+		self.arr  = np.asanyarray(arr)
+		self.epsilon = epsilon
+		self.farr = fft.fft(arr, axes=tuple(range(self.npre,arr.ndim)))
+	def __call__(self, inds, out=None):
+		from . import fft
+		inds, out = _ip_prepare(self, inds, out=out)
+		out = fft.interpol_nufft(self.farr, inds, out=out, nofft=True, epsilon=self.epsilon)
+		return out
+
+def _ip_get_mode(mode, order):
+	# The type of interpolation to do
+	if   mode in ["nn", "nearest"]: mode, order = "spline", 0
+	elif mode in ["lin","linear" ]: mode, order = "spline", 1
+	elif mode in ["cub","cubic"  ]: mode, order = "spline", 3
+	elif mode in ["fft","nufft","fourier"]: mode = "fourier"
+	if mode not in ["spline", "fourier"]: raise ValueError("Unrecognized interpol mode '%s'" % str(mode))
+	return mode, order
+
+def _ip_prepare(self, inds, out=None):
+		inds = np.asanyarray(inds)
+		ndim = inds.ndim
+		if self.arr.ndim-len(inds) != self.npre:
+			raise ValueError("arr.ndim-len(inds) != npre")
+		# Allow us to use ndim<2 inputs, e.g. interpol(np.arange(6),3) instead of
+		# interpol(np.arange(6),[[3]])
+		while inds.ndim < 2: inds = inds[...,None]
+		if out is None:
+			# Doing it this way lets interpol inherit the array subclass from inds, which
+			# is useful when interpolating one enmap with another enmap
+			out = np.zeros_like(inds, shape=self.arr.shape[:self.npre]+inds.shape[1:], dtype=self.arr.dtype)
+		return inds, out
 
 def interp(x, xp, fp, left=None, right=None, period=None):
 	"""Unlike utils.interpol, this is a simple wrapper around np.interp that extends it
@@ -3219,15 +3303,22 @@ class Minres:
 		# Estimate of variance of Ax-b
 		self.abserr = self.rz/len(self.x)
 
-def nditer(shape):
+def nditer(shape, axes=None):
+	"""Iterate over all multidimensional indices into an array with the given shape.
+	If axes is specified, then it should be a list of the axes in shape to iterate
+	over. The remaining axes will not be indexed (the yielded multi-index will have
+	slice(None) for those axes). The order the entries in axes does not matter."""
 	ndim = len(shape)
-	I    = [0]*ndim
+	axes = tuple(range(ndim)) if axes is None else tuple(sorted([ax%ndim for ax in axes]))
+	axes = axes[::-1] # will iterate backwards below
+	I = [slice(None)]*ndim
+	for ax in axes: I[ax] = 0
 	while True:
 		yield tuple(I)
-		for dim in range(ndim-1,-1,-1):
-			I[dim] += 1
-			if I[dim] < shape[dim]: break
-			I[dim] = 0
+		for ax in axes:
+			I[ax] += 1
+			if I[ax] < shape[ax]: break
+			I[ax] = 0
 		else:
 			break
 
@@ -3334,6 +3425,20 @@ def setenv(name, value, keep=False):
 def getaddr(a):
 	"""Get the address of the start of a"""
 	return a.__array_interface__["data"][0]
+
+def iscontig(a, naxes=None):
+	"""Return whether array a is C-contiguous. If naxes is specified,
+	then only the last naxes axes need to be contiguous, and axes
+	before that are ignored."""
+	if naxes is None: naxes = a.ndim
+	naxes    = min(a.ndim, naxes)
+	expected = a.itemsize
+	for i in range(naxes):
+		j = a.ndim-1-i
+		if a.strides[j] != expected:
+			return False
+		expected *= a.shape[j]
+	return True
 
 def zip2(*args):
 	"""Variant of python's zip that calls next() the same number of times on

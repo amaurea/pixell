@@ -2,9 +2,8 @@
 full sky."""
 from __future__ import print_function, division
 import numpy as np, os, warnings
-from . import enmap, powspec, wcsutils, utils, bunch
+from . import enmap, powspec, wcsutils, utils, bunch, cpixell
 
-from . import cmisc
 # Initialize DUCC's thread num variable from OMP's if it's not already set.
 # This must be done before importing ducc0 for the first time. Doing this
 # limits wasted memory from ducc allocating too big a thread pool. For computes
@@ -438,7 +437,7 @@ class alm_info:
 		this function with the same array as "alm" and "out". If the out
 		argument is not specified, then a new array will be constructed
 		and returned."""
-		return cmisc.transpose_alm(self, alm, out=out)
+		return cpixell.transpose_alm(self, alm, out=out)
 	def alm2cl(self, alm, alm2=None):
 		"""Computes the cross power spectrum for the given alm and alm2, which
 		must have the same dtype and broadcast. For example, to get the TEB,TEB
@@ -449,11 +448,11 @@ class alm_info:
 		 cl = ainfo.alm2cl(alm1[:,None,:], alm2[None,:,:])
 		In both these cases the output will be [{T,E,B},{T,E,B},nl].
         The returned cls start at ell=0."""
-		return cmisc.alm2cl(self, alm, alm2=alm2)
+		return cpixell.alm2cl(self, alm, alm2=alm2)
 	def lmul(self, alm, lmat, out=None):
 		"""Computes res[a,lm] = lmat[a,b,l]*alm[b,lm], where lm is the position of the
 		element with (l,m) in the alm array, as defined by this class."""
-		return cmisc.lmul(self, alm, lmat, out=out)
+		return cpixell.lmul(self, alm, lmat, out=out)
 	def __repr__(self):
 		return "alm_info(lmax=%s,mmax=%s,mstart=%s)" % (str(self.lmax),str(self.mmax),str(self.mstart))
 
@@ -678,85 +677,6 @@ def alm2cl(alm, alm2=None, ainfo=None):
 	ainfo = alm_info(nalm=alm.shape[-1]) if ainfo is None else ainfo
 	return ainfo.alm2cl(alm, alm2=alm2)
 
-def alm2cl2(alm, alm2=None, ainfo=None, dtype=None):
-	from . import cpixell
-	alm   = np.asarray(alm)
-	alm2  = np.asarray(alm2) if alm2 is not None else alm
-	# Unify dtypes
-	if dtype is None:
-		dtype = utils.real_dtype(np.result_type(alm, alm2))
-	# Broadcast alms. This looks scary, but just results in views of the original
-	# arrays according to the documentation. Hence, it shouldn't use more memory.
-	# The resulting arrays are non-contiguous, but each individual alm is still
-	# contiguous. We set the writable flags not because we intend to write, but
-	# to silience a false positive warning from numpy
-	alm, alm2 = np.broadcast_arrays(alm, alm2)
-	alm.flags["WRITEABLE"] = alm2.flags["WRITEABLE"] = True
-	# A common use case is to compute TEBxTEB auto-cross spectra, where
-	# e.g. TE === ET since alm1 is the same array as alm2. To avoid duplicate
-	# calculations in this case we use a cache, which skips computing the
-	# cross-spectrum of any given pair of arrays more than once.
-	cache = {}
-	cl = np.zeros(alm.shape[:-1]+(ainfo.lmax+1,), dtype)
-	# We will loop over individual spectra
-	for I in utils.nditer(alm.shape[:-1]):
-		# Avoid duplicate calculation
-		key   = tuple(sorted([utils.getaddr(alm[I]), utils.getaddr(alm2[I])]))
-		if key in cache:
-			cl[I] = cache[key]
-		else:
-			cpixell.alm2cl(ainfo, alm[I], alm2[I], cl[I])
-	return cl
-
-def transpose_alm2(alm, ainfo=None, out=None):
-	from . import cpixell
-	alm = np.asanyarray(alm)
-	if ainfo is None: ainfo = alm_info(nalm=alm.shape[-1])
-	if out   is None: out   = np.zeros_like(alm)
-	for I in utils.nditer(alm.shape[:-1]):
-		cpixell.transpose_alm(ainfo, alm[I], out[I])
-	return out
-
-# This one is actually faster than the old version, by about 2x
-def lmul2(alm, lmat, ainfo=None, out=None, nomat=False):
-	from . import cpixell
-	alm  = np.asanyarray(alm)
-	lmat = np.asanyarray(lmat)
-	if lmat.ndim == 3 and alm.ndim == 2 and not nomat:
-		# Matrix multiply
-		if out is None: out = np.zeros_like(alm)
-		cpixell.lmatmul(ainfo, alm, lmat, out)
-	else:
-		try:
-			pre  = np.broadcast_shapes(alm.shape[:-1], lmat.shape[:-1])
-		except ValueError:
-			raise ValueError("lmul's alm and lmat's dimensions must either broadcast (when ignoring the last dimension), or have shape compatible with a matrix product (again ignoring the last dimension)")
-		alm  = np.broadcast_to(alm,  pre+ alm.shape[-1:])
-		lmat = np.broadcast_to(lmat, pre+lmat.shape[-1:])
-		if out is None: out = np.zeros_like(alm)
-		for I in utils.nditer(alm.shape[:-1]):
-			cpixell.lmul(ainfo, alm[I], lmat[I], out[I])
-	return out
-
-def transfer_alm2(iainfo, ialm, oainfo, oalm=None, op=lambda a,b:b):
-	"""Transfer alm from one layout to another."""
-	from . import cpixell
-	ialm = np.asanyarray(ialm)
-	if oalm is None:
-		oalm = np.zeros_like(ialm, shape=ialm.shape[:-1]+(oainfo.nelem,))
-	lmax = min(iainfo.lmax, oainfo.lmax)
-	mmax = min(iainfo.mmax, oainfo.mmax)
-	if ialm.shape[:-1] != oalm.shape[:-1]:
-		raise ValueError("ialm and oalm must agree on pre-dimensions")
-	imstart = iainfo.mstart.view(np.int64)
-	omstart = oainfo.mstart.view(np.int64)
-	def transfer(dest, src, op): dest[:] = op(dest, src)
-	for I in utils.nditer(ialm.shape[:-1]):
-		ia = ialm[I]; oa = oalm[I]
-		for m in range(0, mmax+1):
-			transfer(oa[omstart[m]+m*oainfo.stride:omstart[m]+(lmax+1)*oainfo.stride:oainfo.stride], ia[imstart[m]+m*iainfo.stride:imstart[m]+(lmax+1)*iainfo.stride:iainfo.stride], op)
-	return oalm
-
 euler_angs={}
 euler_angs[("gal","equ")] = np.array([57.06793215,  62.87115487, -167.14056929])*utils.degree
 euler_angs[("equ","gal")] = -euler_angs[("gal","equ")][::-1]
@@ -793,7 +713,7 @@ def transfer_alm(iainfo, ialm, oainfo, oalm=None, op=lambda a,b:b):
 	case oalm is returned. If op is specified, then it defines out oalm
 	is updated: oalm = op(ialm, oalm). For example, if op = lambda a,b:a+b,
 	then ialm would be added to oalm instead of overwriting it."""
-	return cmisc.transfer_alm(iainfo, ialm, oainfo, oalm=oalm, op=op)
+	return cpixell.transfer_alm(iainfo, ialm, oainfo, oalm=oalm, op=op)
 
 ##############################
 ### Implementation details ###

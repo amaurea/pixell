@@ -89,7 +89,7 @@ class DigitalButterTrim:
 		"""Return a new instance with the given multipole bounds"""
 		return DigitalButterTrim(step=self.step, shape=self.shape, trim=self.trim, lmin=lmin, lmax=lmax)
 	def __call__(self, i, l):
-		return utils.interpol(self.profiles[i], l[None], order=0)
+		return utils.interpol(self.profiles[i], l[None], mode="nn")
 	def get_variance_basis(self):
 		raise NotImplementedError
 	def kernel(self, i, l):

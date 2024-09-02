@@ -1,20 +1,22 @@
 module array_ops
+	use iso_c_binding
+	implicit none
 
 contains
 
 ! real: data type
-! _: data precision
+! c_float: data precision
 ! C: lapack dtype char
 ! L, L0: eigpow limits
 ! ONE, ZERO: gemm constants
 ! SY: matrix form
 
-subroutine matmul_multi_sym(A, b)
+subroutine matmul_multi_sym(A, b, npix, n, k) bind(c)
 	! This function assumes very small matrices, so it uses matmul instead of sgemm
-	implicit none
-	real(_), intent(in)    :: A(:,:,:)
-	real(_), intent(inout) :: b(:,:,:)
-	real(_)    :: x(size(b,1),size(b,2))
+	integer(c_int), value         :: npix, n, k
+	real(c_float),        intent(in)    :: A(n,n,npix)
+	real(c_float),        intent(inout) :: b(n,k,npix)
+	real(c_float)    :: x(size(b,1),size(b,2))
 	integer(4) :: i
 	!$omp parallel do private(i,x)
 	do i = 1, size(A,3)
@@ -23,12 +25,12 @@ subroutine matmul_multi_sym(A, b)
 	end do
 end subroutine
 
-subroutine matmul_multi(A, b, x)
+subroutine matmul_multi(A, b, x, npix, n, m, k) bind(c)
 	! This function assumes very small matrices, so it uses matmul instead of sgemm
-	implicit none
-	real(_), intent(in)    :: A(:,:,:)
-	real(_), intent(in)    :: b(:,:,:)
-	real(_), intent(inout) :: x(:,:,:)
+	integer(c_int), value         :: npix, n, m, k
+	real(c_float),        intent(in)    :: A(m,n,npix)
+	real(c_float),        intent(in)    :: b(m,k,npix)
+	real(c_float),        intent(inout) :: x(n,k,npix)
 	integer(4) :: i
 	!$omp parallel do private(i)
 	do i = 1, size(A,3)
@@ -36,11 +38,11 @@ subroutine matmul_multi(A, b, x)
 	end do
 end subroutine
 
-subroutine ang2rect(ang, rect)
-	implicit none
-	real(_), intent(in)    :: ang(:,:)
-	real(_), intent(inout) :: rect(:,:)
-	real(_) :: st,ct,sp,cp
+subroutine ang2rect(ang, rect, n) bind(c)
+	integer(c_int), value      :: n
+	real(c_float), intent(in)        :: ang(2,n)
+	real(c_float), intent(inout)     :: rect(3,n)
+	real(c_float) :: st,ct,sp,cp
 	integer :: i
 	!$omp parallel do private(i,st,ct,sp,cp)
 	do i = 1, size(ang,2)
@@ -56,17 +58,14 @@ end subroutine
 ! value in vals, which must be sorted in ascending order. omap
 ! will be 0 in pixels where no crossing happens, and i where
 ! a crossing for vals(i) happens.
-subroutine find_contours(imap, vals, omap)
-	implicit none
-	real(_), intent(in) :: imap(:,:), vals(:)
-	integer, intent(inout) :: omap(:,:)
+subroutine find_contours(imap, vals, omap, ny, nx, nv) bind(c)
+	integer(c_int), value         :: ny, nx, nv
+	real(c_float),        intent(in)    :: imap(nx,ny), vals(nv)
+	integer(c_int), intent(inout) :: omap(nx,ny)
 	integer, allocatable   :: work(:,:)
-	real(_) :: v
-	integer :: y, x, ip, i, ny, nx, nv
+	real(c_float) :: v
+	integer :: y, x, ip, i
 	logical :: left, right
-	ny = size(imap,1)
-	nx = size(imap,2)
-	nv = size(vals)
 	allocate(work(ny,nx))
 	do x = 1, nx
 		do y = 1, ny
@@ -108,14 +107,12 @@ subroutine find_contours(imap, vals, omap)
 	end do
 end subroutine
 
-subroutine roll_rows(imap, offsets, omap)
-	implicit none
-	real(_), intent(in)    :: imap(:,:)
-	integer, intent(in)    :: offsets(:)
-	real(_), intent(inout) :: omap(:,:)
-	integer :: ny, nx, y, ix, ox
-	nx   = size(imap,1)
-	ny   = size(imap,2)
+subroutine roll_rows(imap, offsets, omap, ny, nx) bind(c)
+	integer(c_int), value         :: ny, nx
+	real(c_float),        intent(in)    :: imap(nx,ny)
+	integer(c_int), intent(in)    :: offsets(ny)
+	real(c_float),        intent(inout) :: omap(nx,ny)
+	integer :: y, ix, ox
 	!$omp parallel do private(ix,ox)
 	do y = 1, ny
 		do ix = 1, nx

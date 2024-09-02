@@ -1,9 +1,10 @@
-subroutine remap(a, res, vals, cols)
+subroutine remap(a, res, vals, cols, na, nval, ncomp) bind(c)
 	use iso_c_binding
 	implicit none
-	real(8),    intent(in)    :: a(:), vals(:)
-	integer(2), intent(in)    :: cols(:,:)
-	integer(2), intent(inout) :: res(:,:)
+	real(c_double),     intent(in)    :: a(na), vals(nval)
+	integer(c_int16_t), intent(in)    :: cols(ncomp,nval)
+	integer(c_int16_t), intent(inout) :: res(ncomp,na)
+	integer(c_int),     value         :: na, nval, ncomp
 	real(8) :: v, x(2), y(size(cols,1),2)
 	integer :: i, j
 	!$omp parallel do private(i,v,x,y)
@@ -30,11 +31,12 @@ subroutine remap(a, res, vals, cols)
 	end do
 end subroutine
 
-subroutine direct(a, res)
+subroutine direct(a, res, na, ncomp) bind(c)
 	use iso_c_binding
 	implicit none
-	real(8),    intent(in)    :: a(:,:)
-	integer(2), intent(inout) :: res(:,:)
+	real(c_double),     intent(in)    :: a(na,ncomp)
+	integer(c_int16_t), intent(inout) :: res(4,na)
+	integer(c_int),     value         :: na, ncomp
 	real(8) :: v
 	integer :: i
 	!$omp parallel do private(i,v)
@@ -49,15 +51,16 @@ subroutine direct(a, res)
 	end do
 end subroutine
 
-subroutine direct_colorcap(a, res)
+subroutine direct_colorcap(a, res, na, ncomp) bind(c)
 	! Like direct, but caps jointly across colors instead of
 	! individually. This preserves colors of saturated regions
 	! instead of just ending up with white. The cost of this is
 	! that high noise in a single component leaks into all components
 	use iso_c_binding
 	implicit none
-	real(8),    intent(in)    :: a(:,:)
-	integer(2), intent(inout) :: res(:,:)
+	real(c_double),     intent(in)    :: a(na,ncomp)
+	integer(c_int16_t), intent(inout) :: res(4,na)
+	integer(c_int),     value         :: na, ncomp
 	real(8) :: v, hue(3), amp, color(3)
 	integer :: i, nc
 	nc = size(a,2)

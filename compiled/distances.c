@@ -1,10 +1,43 @@
 #define _GNU_SOURCE
-#include "distances_core.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <math.h>
 #include <string.h>
 #include <sys/time.h>
+
+#define inum int64_t
+// Forward delcarations
+void distance_from_points_simple(inum npix, double * posmap, inum npoint, double * points, double * dists, int * areas);
+void distance_from_points_simple_separable(inum ny, inum nx, double * ypos, double * xpos, inum npoint, double * points, double * dists, int * areas);
+inum find_edges(inum ny, inum nx, uint8_t * mask, inum ** edges);
+inum find_edges_labeled(inum ny, inum nx, int * labels, inum ** edges);
+void distance_from_points_bubble(int ny, int nx, double * posmap, inum npoint, double * point_pos, int * point_pix, double rmax, double * dists, int * domains);
+void distance_from_points_bubble_separable(int ny, int nx, double * ypos, double * xpos, inum npoint, double * point_pos, int * point_pix, double rmax, double * dists, int * domains);
+
+void distance_from_points_cellgrid(int ny, int nx, double * ypos, double * xpos, inum npoint, double * point_pos,
+		int * point_pix, int bsize_y, int bsize_x, double rmax, double dr, int separable, double * dists, int * domains);
+
+typedef struct {
+	int nside, ny;
+	inum npix, ncap;
+	int * nx;
+	inum * off;
+	int  * shift;
+	double *ra0, *dec;
+	double *cos_dec, *sin_dec; // precompute for speed
+} healpix_info;
+
+healpix_info * build_healpix_info(int nside);
+void free_healpix_info(healpix_info * geo);
+void unravel_healpix(healpix_info * geo, inum npoint, inum * pix1d, int32_t * pix2d);
+void ravel_healpix(healpix_info * geo, inum npoint, int32_t * pix2d, inum * pix1d);
+void get_healpix_neighs(healpix_info * geo, int y, int x, int * oy, int * ox);
+inum find_edges_healpix(healpix_info * geo, uint8_t * mask, int ** edges);
+inum find_edges_labeled_healpix(healpix_info * geo, int32_t * labels, int ** edges);
+void distance_from_points_bubble_healpix(healpix_info * geo, inum npoint, double * point_pos, int * point_pix, double rmax, double * dists, int * domains);
+void distance_from_points_heap_healpix(healpix_info * geo, inum npoint, double * point_pos, int * point_pix, double rmax, double * dists, int * domains);
+
 
 #define pi 3.141592653589793238462643383279502884197
 #define nneigh 4
@@ -90,7 +123,7 @@ void distance_from_points_simple_separable(inum ny, inum nx, double * ypos, doub
 	// result in dists. Use Vincenty formula for distances. It's a bit slower than the simplest formula, but
 	// it's very stable. Can optimize later
 	// Precompute cos and sin dec for the edge pixels
-	double t1 = wall_time();
+	//double t1 = wall_time();
 	double * edge_cos_dec = realloc(NULL, (inum)npoint*sizeof(double));
 	double * edge_sin_dec = realloc(NULL, (inum)npoint*sizeof(double));
 	for(inum j = 0; j < npoint; j++) {
@@ -98,7 +131,7 @@ void distance_from_points_simple_separable(inum ny, inum nx, double * ypos, doub
 		edge_cos_dec[j] = cos(dec);
 		edge_sin_dec[j] = sin(dec);
 	}
-	double t2 = wall_time();
+	//double t2 = wall_time();
 	#pragma omp parallel for
 	for(inum y = 0; y < ny; y++) {
 		double pix_dec = ypos[y];
@@ -125,8 +158,7 @@ void distance_from_points_simple_separable(inum ny, inum nx, double * ypos, doub
 			}
 		}
 	}
-	double t3 = wall_time();
-	fprintf(stderr, "%8.4f %8.4f\n", t2-t1, t3-t2);
+	//double t3 = wall_time();
 	free(edge_cos_dec);
 	free(edge_sin_dec);
 }
@@ -599,8 +631,8 @@ void fetch_edge(Cell * cto, Cell * cfrom, int dir) {
 	// by building a starting pixel offset for it and cto,
 	// and a stride.
 	int ti0, fi0, ts, fs, n;
-	int tnmax = cto->ny*cto->nx;
-	int fnmax = cfrom->ny*cfrom->nx;
+	//int tnmax = cto->ny*cto->nx;
+	//int fnmax = cfrom->ny*cfrom->nx;
 	if(dy == 0) { // Horizontal fetch, so a vertical row of pixels
 		ti0 = dx < 0 ? 0 : cto->nx-1;
 		fi0 = dx < 0 ? cfrom->nx-1 : 0;

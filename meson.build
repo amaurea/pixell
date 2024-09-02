@@ -1,14 +1,7 @@
-# Main build file for pixell, helping with building the fortran,
-# c, and cython extensions.
-project(
-    'pixell',
-    ['c', 'fortran', 'cython'],
-)
-
+project('pixell', ['c','fortran'])
 py = import('python').find_installation(pure: false)
 
 # Dependencies
-py_dep = py.dependency()
 omp_dep = dependency('openmp')
 
 # Libraries
@@ -16,110 +9,87 @@ cc = meson.get_compiler('c')
 c_m_dep = cc.find_library('m', required: true)
 
 fc = meson.get_compiler('fortran')
-fortran_m_dep = fc.find_library('m', required: true)
-
-# Directories
-library_install_dir = py.get_install_dir() / 'pixell'
-
-# Includes
-
-# Need to massage these into relative paths to keep meson happy.
-# It does not allow for absolute paths.
-incdir_numpy = run_command(
-    py,
-    ['-c', 'import numpy; import os; print(os.path.relpath(numpy.get_include()))'],
-    check: true
-).stdout().strip()
-
-incdir_f2py = run_command(
-    py,
-    ['-c', 'import numpy.f2py; import os; print(os.path.relpath(numpy.f2py.get_include()))'],
-    check: true
-).stdout().strip()
-
-# Build fortran extensions
-
-# Pixell oddity - need to run the makefile (make -C fortran)
-# to generate specific fortran files before we can build them.
-# TODO: put those commands in this meson file instead.
-run_command('make', '-C', 'fortran', check: true)
-
-fortran_include = include_directories(incdir_numpy, incdir_f2py)
 add_project_arguments('-Wno-tabs', language : 'fortran')
 add_project_arguments('-Wno-conversion', language : 'fortran')
 
+# Directories
+odir = py.get_install_dir() / 'pixell'
+
+# We make one shared library per file for now
 fortran_sources = {
-    'fortran/interpol_32.f90': '_interpol_32',
-    'fortran/interpol_64.f90': '_interpol_64',
-    'fortran/colorize.f90': '_colorize',
-    'fortran/array_ops_32.f90': '_array_ops_32',
-    'fortran/array_ops_64.f90': '_array_ops_64',
+	'compiled/colorize.f90': '_colorize',
+	'compiled/interpol_32.f90': '_interpol_32',
+	'compiled/interpol_64.f90': '_interpol_64',
+	'compiled/array_ops_32.f90': '_array_ops_32',
+	'compiled/array_ops_64.f90': '_array_ops_64',
 }
 
-foreach source_name, module_name : fortran_sources
-    f2py_output = custom_target(
-        input: source_name,
-        output: [module_name + '-f2pywrappers2.f90', module_name + 'module.c'],
-        command: [py, '-m', 'numpy.f2py', '@INPUT@', '-m', module_name, '--lower'],
-    )
-
-    py.extension_module(
-        module_name,
-        [source_name, f2py_output],
-        incdir_f2py / 'fortranobject.c',
-        include_directories: fortran_include,
-        dependencies: [py_dep, omp_dep, c_m_dep, fortran_m_dep],
-        install: true,
-        subdir: 'pixell'
-    )
+foreach srcs, name : fortran_sources
+	shared_library(name, srcs, dependencies: [omp_dep],
+		install: true, install_dir: odir, name_prefix: '')
 endforeach
 
-
-# Build c(ython) extensions.
-
-# Before building cython, we must build shared libraries for all of
-# the underlying c code that those cython extensions rely on.
-
-helper_sources = {
-    'cython/cmisc_core.c': '_cmisc_shared',
-    'cython/distances_core.c': '_distances_shared',
-    'cython/srcsim_core.c': '_srcsim_shared',
+c_sources = {
+	'compiled/cmisc.c': '_cmisc',
+	'compiled/srcsim.c': '_srcsim',
+	'compiled/distances.c': '_distances',
 }
 
-linkables = []
-
-foreach source_name, module_name : helper_sources
-    linkables += shared_library(
-        module_name,
-        source_name,
-        install: true,
-        install_dir: library_install_dir,
-        include_directories: [incdir_numpy],
-        dependencies: [omp_dep, c_m_dep],
-    )
+foreach srcs, name : c_sources
+	shared_library(name, srcs, dependencies: [omp_dep, c_m_dep],
+		install: true, install_dir: odir, name_prefix: '')
 endforeach
 
-# Now we can build cython and link our shared libraries to them.
+# The python sources. Must be manually updated when new files are added.
+# Meson supports globbing, but heavily discourages doing so due to what
+# appears to be technical limitations, where meson needs to be reinvoked
+# if new files are added, and if one forgets this, one will get strange
+# errors. But really, with the manual approach one will also get strange
+# errors if one forgets to update this build script, so it seems exactly
+# the same to me.
+python_sources = [
+	'pixell/__init__.py',
+	'pixell/aberration.py',
+	'pixell/analysis.py',
+	'pixell/array_ops.py',
+	'pixell/bunch.py',
+	'pixell/cgrid.py',
+	'pixell/colorize.py',
+	'pixell/colors.py',
+	'pixell/coordinates.py',
+	'pixell/curvedsky.py',
+	'pixell/enmap.py',
+	'pixell/enplot.py',
+	'pixell/fft.py',
+	'pixell/interpol.py',
+	'pixell/lensing.py',
+	'pixell/memory.py',
+	'pixell/mpi.py',
+	'pixell/multimap.py',
+	'pixell/pointsrcs.py',
+	'pixell/powspec.py',
+	'pixell/reproject.py',
+	'pixell/resample.py',
+	'pixell/tilemap.py',
+	'pixell/uharm.py',
+	'pixell/utils.py',
+	'pixell/wavelets.py',
+	'pixell/wcsutils.py',
+	# Not technically a python source file, but is required for pixell
+	'pixell/arial.ttf',
+]
 
-cython_sources = {
-    'cython/cmisc.pyx': 'cmisc',
-    'cython/distances.pyx': 'distances',
-    'cython/srcsim.pyx': 'srcsim',
-}
+py.install_sources(
+	python_sources,
+	subdir: 'pixell',
+)
 
-foreach source_name, module_name : cython_sources
-    cython_module = py.extension_module(
-        module_name,
-        source_name,
-        include_directories: ['cython', incdir_numpy],
-        dependencies: [py_dep, omp_dep, c_m_dep],
-        link_with: linkables,
-        install: true,
-        subdir: 'pixell',
-    )
-endforeach
+python_scripts = [
+	'scripts/benchmark_pixell_runner.py',
+	'scripts/benchmark_pixell.py',
+]
 
-# The actual python install itself is left up to a helper build
-# script deifned in pixell/
-subdir('pixell')
-subdir('scripts')
+py.install_sources(
+	python_scripts,
+	subdir: 'pixell/scripts',
+)

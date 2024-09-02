@@ -26,7 +26,7 @@ from __future__ import print_function, division
 import numpy as np, time
 from astropy.io import fits
 from scipy import spatial
-from . import utils, enmap, srcsim, wcsutils
+from . import utils, enmap, cpixell, wcsutils
 
 #### Map-space source simulation ###
 
@@ -77,51 +77,6 @@ def sim_objects(shape, wcs, poss, amps, profile, prof_ids=None, omap=None, vmin=
 	be returned (after being updated of course). In this case, the simulated
 	sources will have been added (or maxed etc. depending on op) into the map.
 	Otherwise, the only signal in the map will be the objects."""
-	dtype = np.float32 # C extension only supports this dtype
-	if separable == "auto": separable = wcsutils.is_cyl(wcs)
-	# Object positions
-	obj_decs = np.asanyarray(poss[0], dtype=dtype, order="C")
-	obj_ras  = np.asanyarray(poss[1], dtype=dtype, order="C")
-	obj_ys, obj_xs = utils.nint(enmap.sky2pix(shape, wcs, poss)).astype(np.int32)
-	assert obj_decs.ndim == 1 and obj_ras.ndim == 1, "poss must be [{dec,ra},nobj]"
-	nobj     = len(obj_decs)
-	# Object amplitudes, and number of components
-	amps     = np.asanyarray(amps, dtype=dtype, order="C")
-	pre      = amps.shape[:-1]
-	amps_flat= amps.reshape(-1, amps.shape[-1])
-	ncomp    = len(amps_flat)
-	# Profiles. For point sources this would just be the beam, but extended objects
-	# can have differnet profiles. We will support both [{r,b}] and [[{r,b}],[{r,b}],...]
-	try: profile[0][0][0]
-	except (TypeError, IndexError): profile = [profile]
-	profile = tuple([np.asanyarray(p, dtype=dtype, order="C") for p in profile])
-	# If which profile to use isn't specified, default to the first one
-	if prof_ids is None: prof_ids = np.zeros(nobj, np.int32)
-	else: prof_ids = np.asanyarray(prof_ids, dtype=np.int32, order="C")
-	if prof_equi == "auto": prof_equi = all([is_equi(prof[0]) for prof in profile])
-	# If user hasn't specified how faint things to simulate, then set the limit a bit
-	# below the peak of the faintest object
-	if vmin is None: vmin = np.min(np.abs(amps))*1e-3
-	if rmax is None: rmax = 0
-	# Set up the pixel coordinates
-	if separable: posmap = utils.cache_get(cache, "posmap", lambda: tuple(enmap.posaxes(shape, wcs, dtype=dtype)))
-	else:         posmap = utils.cache_get(cache, "posmap", lambda: tuple(enmap.posmap (shape, wcs, dtype=dtype)))
-	# Set up our output map
-	if omap is None: omap_flat = enmap.zeros((ncomp,)+shape[-2:], wcs, dtype)
-	else:            omap_flat = omap.preflat
-	assert omap_flat.dtype == dtype, "omap.dtype must be np.float32"
-	assert omap_flat.shape == (ncomp,)+shape[-2:], "omap must be [...,ny,nx], where [ny,nx] agrees with shape, and ... agrees with amps"
-	# Whew! Actually do the work
-	times = srcsim.sim_objects(omap_flat, obj_decs, obj_ras, obj_ys, obj_xs, amps_flat, profile, prof_ids, posmap, vmin, rmax=rmax, separable=separable, transpose=transpose, prof_equi=prof_equi, return_times=True)[1]
-	omap = omap_flat.reshape(pre+shape[-2:])
-	# NB! Since we're not padding, this fourier operation will have problems at the edges
-	if pixwin: omap = enmap.apply_window(omap, order=pixwin_order)
-	return (omap, times) if return_times else omap
-
-def sim_objects2(shape, wcs, poss, amps, profile, prof_ids=None, omap=None, vmin=None, rmax=None,
-		op="add", pixwin=False, pixwin_order=0, separable="auto", transpose=False, prof_equi="auto", cache=None,
-		return_times=False):
-	from . import cpixell
 	dtype = np.float32 # C extension only supports this dtype
 	if separable == "auto": separable = wcsutils.is_cyl(wcs)
 	# Object positions
@@ -214,7 +169,7 @@ def radial_sum(map, poss, bins, oprofs=None, separable="auto",
 	oprofs_flat   = oprofs.reshape(nobj,ncomp,nbin)
 	assert oprofs_flat.dtype == dtype, "oprofs.dtype must be np.float32"
 	# Whew! Actually do the work
-	times = srcsim.radial_sum(map_flat, obj_decs, obj_ras, obj_ys, obj_xs, bins, posmap, profs=oprofs_flat, separable=separable, prof_equi=prof_equi, return_times=True)[1]
+	times = cpixell.radial_sum(map_flat, obj_decs, obj_ras, obj_ys, obj_xs, bins, posmap, profs=oprofs_flat, separable=separable, prof_equi=prof_equi, return_times=True)[1]
 	return (oprofs, times) if return_times else oprofs
 
 def radial_sum2(map, poss, bins, oprofs=None, separable="auto",
@@ -264,6 +219,55 @@ def radial_sum2(map, poss, bins, oprofs=None, separable="auto",
 	assert oprofs_flat.dtype == dtype, "oprofs.dtype must be np.float32"
 	# Whew! Actually do the work
 	times = cpixell.radial_sum(map_flat, obj_decs, obj_ras, obj_ys, obj_xs, bins, posmap, profs=oprofs_flat, separable=separable, prof_equi=prof_equi, return_times=True)[1]
+	return (oprofs, times) if return_times else oprofs
+
+def radial_sum3(map, poss, bins, oprofs=None, separable="auto",
+		prof_equi="auto", cache=None, return_times=False):
+	"""Sum the signal in map into radial bins around a set of objects,
+	returning one radial sum-profile per object.
+	Arguments:
+	* map: The map to read data from. [...,ny,nx]
+	* poss: The positions of the objects. [{dec,ra},nobj] in radians.
+	* bins: The bin edges. [nbin+1]. Faster if equi-spaced with first at 0
+
+	Optional arguments:
+	* oprofs: [obj,...,nbin] array to write result to. MUST BE float32 AND C CONTIGUOUS
+	* separable: Whether the coordinate system's coordinate axes are indpendent,
+	  such that one only needs to know y in order to calculate dec, and x to
+	  calculate ra. This allows for much faster calculation of the pixel
+	  coordinates. Default "auto": True for cylindrical coordinates, False otherwise.
+	* cache: Dictionary to use for caching pixel coordinates. Can be useful
+	  if you're doing repeated simulations on the same geometry with non-separable
+	  geometry, to avoid having to recalculate the pixel coordinates all the time.
+
+	Returns the resulting profiles. If oprof was specified, then the same object will
+	be returned (after being updated of course)."""
+	from . import cpixell2
+	dtype = np.float32 # C extension only supports this dtype
+	if separable == "auto": separable = wcsutils.is_cyl(map.wcs)
+	# Object positions
+	obj_decs = np.asanyarray(poss[0], dtype=dtype, order="C")
+	obj_ras  = np.asanyarray(poss[1], dtype=dtype, order="C")
+	obj_ys, obj_xs = utils.nint(map.sky2pix(poss)).astype(np.int32)
+	assert obj_decs.ndim == 1 and obj_ras.ndim == 1, "poss must be [{dec,ra},nobj]"
+	nobj     = len(obj_decs)
+	# map and number of components
+	pre      = map.shape[:-2]
+	map_flat = map.preflat
+	ncomp    = len(map_flat)
+	# bins
+	bins     = np.asarray(bins, dtype=dtype)
+	nbin     = len(bins)-1
+	prof_equi = is_equi(bins) if prof_equi == "auto" else prof_equi
+	# Set up the pixel coordinates
+	if separable: posmap = utils.cache_get(cache, "posmap", lambda: map.posaxes(dtype=dtype))
+	else:         posmap = utils.cache_get(cache, "posmap", lambda: map.posmap (dtype=dtype))
+	# Set up our output
+	if oprofs is None: oprofs = np.zeros((nobj,)+pre+(nbin,),dtype)
+	oprofs_flat   = oprofs.reshape(nobj,ncomp,nbin)
+	assert oprofs_flat.dtype == dtype, "oprofs.dtype must be np.float32"
+	# Whew! Actually do the work
+	times = cpixell2.radial_sum(map_flat, obj_decs, obj_ras, obj_ys, obj_xs, bins, posmap, profs=oprofs_flat, separable=separable, prof_equi=prof_equi, return_times=True)[1]
 	return (oprofs, times) if return_times else oprofs
 
 def radial_bin(map, poss, bins, weights=None, separable="auto",
@@ -424,7 +428,7 @@ def eval_srcs_loop(posmap, poss, amps, beam, cres, nhit, cell_srcs, dtype=np.flo
 			r      = utils.angdist(pixpos[::-1,None,:,:],srcpos[::-1,:,None,None])
 			bpix   = (r - beam[0,0])/(beam[0,1]-beam[0,0])
 			# Evaluate the beam at these locations
-			bval   = utils.interpol(beam[1], bpix[None], mode="constant", order=1, mask_nan=False) # [nsrc,ry,rx]
+			bval   = utils.interpol(beam[1], bpix[None], mode="lin", border="constant") # [nsrc,ry,rx]
 			cmodel = srcamp[:,:,None,None]*bval
 			cmodel = op.reduce(cmodel,-3)
 			op(model[:,y1:y2,x1:x2], cmodel, model[:,y1:y2,x1:x2])

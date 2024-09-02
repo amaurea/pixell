@@ -633,8 +633,8 @@ class PixelTests(unittest.TestCase):
         shape2,wcs2 = enmap.fullsky_geometry(res=np.deg2rad(6/60.),proj='car')
         shape3,wcs3 = enmap.fullsky_geometry(res=np.deg2rad(24/60.),proj='car')
         imap = enmap.ones(shape,wcs)
-        omap2 = enmap.project(imap,shape2,wcs2,order=0,mode='wrap')
-        omap3 = enmap.project(imap,shape3,wcs3,order=0,mode='wrap')
+        omap2 = enmap.project(imap,shape2,wcs2,order=0,border='wrap')
+        omap3 = enmap.project(imap,shape3,wcs3,order=0,border='wrap')
         assert np.all(np.isclose(omap2,1))
         assert np.all(np.isclose(omap3,1))
 

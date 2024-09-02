@@ -1,5 +1,5 @@
 import numpy as np, numba, ducc0, time
-from . import coordinates, enmap, utils, curvedsky, wcsutils
+from . import coordinates, enmap, utils, curvedsky, wcsutils, fft
 
 beta    = 0.001235
 dir_equ = np.array([167.919, -6.936])*np.pi/180
@@ -113,13 +113,13 @@ class Aberrator:
 		it precomputes the deflection information instead of needing to
 		compute it from scratch each time."""
 		coord_ctype = utils.complex_dtype(coord_dtype)
-		nthread = int(utils.fallback(utils.getenv("OMP_NUM_THREADS",nthread),0))
+		nthread = nthread or fft.nthread_fft
 		# 1. Calculate the aberration field. These are tiny
 		alm_dpos = calc_boost_field(-beta, dir, nthread=nthread)
 		# 2. Evaluate these on our target geometry.
 		deflect = enmap.zeros(alm_dpos.shape[:-1]+shape[-2:], wcs, coord_dtype)
 		curvedsky.alm2map(alm_dpos.astype(coord_ctype, copy=False), deflect, spin=1, nthread=nthread)
-		# 3. Calculate the offset angles.
+		# 3. Calculate the offset angles. This assumes a (pseudo-)cylindrical projection
 		rinfo = curvedsky.get_ring_info(shape, wcs)
 		dphi  = np.full(shape[-2], wcs.wcs.cdelt[0]*utils.degree)
 		odec, ora, gamma = ducc0.misc.get_deflected_angles(theta=rinfo.theta, phi0=rinfo.phi0,

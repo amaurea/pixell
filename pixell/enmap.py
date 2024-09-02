@@ -18,6 +18,14 @@ from . import utils, wcsutils, powspec, fft as enfft
 #     geometry object would make this less tedious, as long as it is
 #     simple to override individual properties.
 
+# How to handle the new utils.interpol, which uses interpolator objects
+# instead of prefiltering:
+#
+# 1. Make an ndmap_interpolator class that provides all the interpolation-
+#    relevant methods like .at(), .project(), and an enmap method that
+#    makes such an interpolator from that enmap. Can then use that
+#    interpolator
+
 # Python 2/3 compatibility
 try: basestring
 except NameError: basestring = str
@@ -98,13 +106,13 @@ class ndmap(np.ndarray):
 	def npix(self): return np.prod(self.shape[-2:])
 	@property
 	def geometry(self): return self.shape, self.wcs
-	def resample(self, oshape, off=(0,0), method="fft", mode="wrap", corner=False, order=3): return resample(self, oshape, off=off, method=method, mode=mode, corner=corner, order=order)
-	def project(self, shape, wcs, order=3, mode="constant", cval=0, prefilter=True, mask_nan=False, safe=True): return project(self, shape, wcs, order, mode=mode, cval=cval, prefilter=prefilter, mask_nan=mask_nan, safe=safe)
+	def resample(self, oshape, off=(0,0), method="fft", border="wrap", corner=False, order=3): return resample(self, oshape, off=off, method=method, border=border, corner=corner, order=order)
+	def project(self, shape, wcs, mode="spline", order=3, border="constant", cval=0, interpolator=None, safe=True): return project(self, shape, wcs, mode=mode, order=order, border=border, cval=cval, epsilon=None, interpolator=interpolator, safe=safe)
 	def extract(self, shape, wcs, omap=None, wrap="auto", op=lambda a,b:b, cval=0, iwcs=None, reverse=False): return extract(self, shape, wcs, omap=omap, wrap=wrap, op=op, cval=cval, iwcs=iwcs, reverse=reverse)
 	def extract_pixbox(self, pixbox, omap=None, wrap="auto", op=lambda a,b:b, cval=0, iwcs=None, reverse=False): return extract_pixbox(self, pixbox, omap=omap, wrap=wrap, op=op, cval=cval, iwcs=iwcs, reverse=reverse)
 	def insert(self, imap, wrap="auto", op=lambda a,b:b, cval=0, iwcs=None): return insert(self, imap, wrap=wrap, op=op, cval=cval, iwcs=iwcs)
 	def insert_at(self, pix, imap, wrap="auto", op=lambda a,b:b, cval=0, iwcs=None): return insert_at(self, pix, imap, wrap=wrap, op=op, cval=cval, iwcs=iwcs)
-	def at(self, pos, order=3, mode="constant", cval=0.0, unit="coord", prefilter=True, mask_nan=False, safe=True): return at(self, pos, order, mode=mode, cval=0, unit=unit, prefilter=prefilter, mask_nan=mask_nan, safe=safe)
+	def at(self, pos, mode="spline", order=3, border="constant", cval=0.0, unit="coord", interpolator=None, safe=True): return at(self, pos, mode=mode, order=order, border=border, cval=0, epsilon=None, unit=unit, interpolator=interpolator, safe=safe)
 	def argmax(self, unit="coord"): return argmax(self, unit=unit)
 	def autocrop(self, method="plain", value="auto", margin=0, factors=None, return_info=False): return autocrop(self, method, value, margin, factors, return_info)
 	def apod(self, width, profile="cos", fill="zero"): return apod(self, width, profile=profile, fill=fill)
@@ -122,6 +130,8 @@ class ndmap(np.ndarray):
 	def to_healpix(self, nside=0, order=3, omap=None, chunk=100000, destroy_input=False):
 		return to_healpix(self, nside=nside, order=order, omap=omap, chunk=chunk, destroy_input=destroy_input)
 	def to_flipper(self, omap=None, unpack=True): return to_flipper(self, omap=omap, unpack=unpack)
+	def interpolator(self, mode="spline", order=3, border="constant", cval=0.0, epsilon=None):
+		return interpolator(self, mode=mode, order=order, border=border, cval=cval, epsilon=epsilon)
 	def __getitem__(self, sel):
 		# Split sel into normal and wcs parts.
 		sel1, sel2 = utils.split_slice(sel, [self.ndim-2,2])
@@ -540,7 +550,16 @@ def contains(shape, wcs, pos, unit="coord"):
 	else:               pix = pos
 	return np.all((pix>=0)&(pix.T<shape[-2:]).T,0)
 
-def project(map, shape, wcs, order=3, mode="constant", cval=0.0, force=False, prefilter=True, mask_nan=False, safe=True, bsize=1000):
+# To move to the new utils.interpol, this function could take an optional
+# interpolator as argument. If it is used, then pix won't need to be offset,
+# assuming the interpolator has already precomputed anything that scales with
+# npix. In practice that's not the case for the fourier interpolator yet :(
+# But banding is incompatible with the prebuilt interpolator approach. Could
+# just disable banding in this case, but that would use a lot of memory.
+# On the other hand, banding is quite inaccurate...
+# Regardless of precomputation, banding is necessary for the lowest memory use.
+def project(map, shape, wcs, mode="spline", order=3, border="constant", cval=0.0,
+		epsilon=None, force=False, interpolator=None, safe=True, bsize=1000):
 	"""Project the map into a new map given by the specified
 	shape and wcs, interpolating as necessary. Handles nan
 	regions in the map by masking them before interpolating.
@@ -553,16 +572,26 @@ def project(map, shape, wcs, order=3, mode="constant", cval=0.0, force=False, pr
 		elif wcsutils.is_compatible(map.wcs, wcs) and mode == "constant":
 			return extract(map, shape, wcs, cval=cval)
 	omap = zeros(map.shape[:-2]+shape[-2:], wcs, map.dtype)
+	if interpolator and not interpolator.prefiltered:
+		# Banding won't work if each interpolator evaluation
+		# ends up filtering the full map anyway
+		interpolator(map.sky2pix(omap.posmap(), safe=safe), out=omap)
+	else:
 	# Save memory by looping over rows
-	for i1 in range(0, shape[-2], bsize):
-		i2     = min(i1+bsize, shape[-2])
-		somap  = omap[...,i1:i2,:]
-		pix    = map.sky2pix(somap.posmap(), safe=safe)
-		y1     = max(np.min(pix[0]).astype(int)-3,0)
-		y2     = min(np.max(pix[0]).astype(int)+3,map.shape[-2])
-		if y2-y1 <= 0: continue
-		pix[0] -= y1
-		somap[:] = utils.interpol(map[...,y1:y2,:], pix, order=order, mode=mode, cval=cval, prefilter=prefilter, mask_nan=mask_nan)
+		pad = max(bsize//10,3)
+		for i1 in range(0, shape[-2], bsize):
+			i2     = min(i1+bsize, shape[-2])
+			somap  = omap[...,i1:i2,:]
+			pix    = map.sky2pix(somap.posmap(), safe=safe)
+			y1     = max(np.min(pix[0]).astype(int)-pad,0)
+			y2     = min(np.max(pix[0]).astype(int)+pad,map.shape[-2])
+			if y2-y1 <= 0: continue
+			if interpolator:
+				interpolator(pix, out=somap)
+			else:
+				pix[0] -= y1
+				somap[:] = utils.interpol(map[...,y1:y2,:], pix, mode=mode, order=order,
+					border=border, cval=cval, epsilon=epsilon)
 	return omap
 
 def pixbox_of(iwcs,oshape,owcs):
@@ -715,9 +744,11 @@ def neighborhood_pixboxes(shape, wcs, poss, r):
 	res[...,1,:] += 1
 	return res
 
-def at(map, pos, order=3, mode="constant", cval=0.0, unit="coord", prefilter=True, mask_nan=False, safe=True):
+def at(map, pos, mode="spline", order=3, border="constant", cval=0.0,
+			epsilon=None, unit="coord", interpolator=None, safe=True):
 	if unit != "pix": pos = sky2pix(map.shape, map.wcs, pos, safe=safe)
-	return utils.interpol(map, pos, order=order, mode=mode, cval=cval, prefilter=prefilter, mask_nan=mask_nan)
+	if interpolator: return interpolator(pos)
+	else: return utils.interpol(map, pos, mode=mode, order=order, border=border, cval=cval, epsilon=epsilon)
 
 def argmax(map, unit="coord"):
 	"""Return the coordinates of the maximum value in the specified map.
@@ -774,7 +805,7 @@ def rand_gauss_iso_harm(shape, wcs, cov, pixel_units=False):
 		if not(pixel_units): cov = cov * np.prod(shape[-2:])/area(shape,wcs )
 		covsqrt = multi_pow(cov, 0.5)
 	else:
-		covsqrt = spec2flat(shape, wcs, massage_spectrum(cov, shape), 0.5, mode="constant")
+		covsqrt = spec2flat(shape, wcs, massage_spectrum(cov, shape), 0.5, border="constant")
 	data = map_mul(covsqrt, rand_gauss_harm(shape, wcs))
 	return ndmap(data, wcs)
 
@@ -1586,7 +1617,7 @@ def create_wcs(shape, box=None, proj="cea"):
 		box *= utils.degree
 	return wcsutils.build(box, shape=shape, rowmajor=True, system=proj)
 
-def spec2flat(shape, wcs, cov, exp=1.0, mode="constant", oversample=1, smooth="auto"):
+def spec2flat(shape, wcs, cov, exp=1.0, border="constant", oversample=1, smooth="auto"):
 	"""Given a (ncomp,ncomp,l) power spectrum, expand it to harmonic map space,
 	returning (ncomp,ncomp,y,x). This involves a rescaling which converts from
 	power in terms of multipoles, to power in terms of 2d frequency.
@@ -1621,12 +1652,12 @@ def spec2flat(shape, wcs, cov, exp=1.0, mode="constant", oversample=1, smooth="a
 	cov[~np.isfinite(cov)] = 0
 	# Use order 1 because we will perform very short interpolation, and to avoid negative
 	# values in spectra that must be positive (and it's faster)
-	res = ndmap(utils.interpol(cov, np.reshape(ls,(1,)+ls.shape),mode=mode, mask_nan=False, order=1),wcs)
+	res = ndmap(utils.interpol(cov, np.reshape(ls,(1,)+ls.shape), mode="lin", border=border), wcs)
 	res = downgrade(res, oversample)
 	res = res.reshape(oshape[:-2]+res.shape[-2:])
 	return res
 
-def spec2flat_corr(shape, wcs, cov, exp=1.0, mode="constant"):
+def spec2flat_corr(shape, wcs, cov, exp=1.0, border="constant"):
 	cov    = np.asarray(cov)
 	oshape = cov.shape[:-1] + tuple(shape)[-2:]
 	if cov.ndim == 1: cov = cov[None,None]
@@ -1645,7 +1676,7 @@ def spec2flat_corr(shape, wcs, cov, exp=1.0, mode="constant"):
 	dpos = posmap(shape, wcs)
 	dpos -= dpos[:,None,None,dpos.shape[-2]//2,dpos.shape[-1]//2]
 	ipos = np.arccos(np.cos(dpos[0])*np.cos(dpos[1]))*nr/rmax
-	corr2d = utils.interpol(corrfun, ipos.reshape((-1,)+ipos.shape), mode=mode, mask_nan=False, order=1)
+	corr2d = utils.interpol(corrfun, ipos.reshape((-1,)+ipos.shape), mode="lin", border=border)
 	corr2d = np.roll(corr2d, -corr2d.shape[-2]//2, -2)
 	corr2d = np.roll(corr2d, -corr2d.shape[-1]//2, -1)
 	corr2d = ndmap(corr2d, wcs)
@@ -1813,10 +1844,10 @@ def upgrade_geometry(shape, wcs, factor):
 def distance_transform(mask, omap=None, rmax=None, method="cellgrid"):
 	"""Given a boolean mask, produce an output map where the value in each pixel is the distance
 	to the closest false pixel in the mask. See distance_from for the meaning of rmax."""
-	from pixell import distances
+	from . import cpixell
 	if omap is None: omap = zeros(mask.shape, mask.wcs)
 	for i in range(len(mask.preflat)):
-		edge_pix = np.array(distances.find_edges(mask.preflat[i]))
+		edge_pix = np.array(cpixell.find_edges(mask.preflat[i]))
 		edge_pos = mask.pix2sky(edge_pix, safe=False)
 		omap.preflat[i] = distance_from(mask.shape, mask.wcs, edge_pos, rmax=rmax, method=method)
 	# Distance is always zero inside mask
@@ -1827,11 +1858,11 @@ def labeled_distance_transform(labels, omap=None, odomains=None, rmax=None, meth
 	"""Given a map of labels going from 1 to nlabel, produce an output map where the value
 	in each pixel is the distance to the closest nonzero pixel in the labels, as well as a
 	map of which label each pixel was closest to. See distance_from for the meaning of rmax."""
-	from pixell import distances
+	from . import cpixell
 	if omap is None: omap = zeros(labels.shape, labels.wcs)
 	if odomains is None: odomains = zeros(omap.shape, omap.wcs, np.int32)
 	for i in range(len(labels.preflat)):
-		edge_pix = np.array(distances.find_edges_labeled(labels.preflat[i]))
+		edge_pix = np.array(cpixell.find_edges_labeled(labels.preflat[i]))
 		edge_pos = labels.pix2sky(edge_pix, safe=False)
 		_, domains = distance_from(labels.shape, labels.wcs, edge_pos, omap=omap.preflat[i], domains=True, rmax=rmax, method=method)
 		# Get the edge_pix to label mapping
@@ -1851,7 +1882,7 @@ def distance_from(shape, wcs, points, omap=None, odomains=None, domains=False, m
 	distances will only be computed up to rmax. Beyond that distance will be set to rmax
 	and domains to -1. This can be used to speed up the calculation when one only cares
 	about nearby areas."""
-	from pixell import distances
+	from . import cpixell
 	if wcsutils.is_plain(wcs): warnings.warn("Distance functions are not tested on plain coordinate systems.")
 	if omap is None: omap = empty(shape[-2:], wcs)
 	if domains and odomains is None: odomains = empty(shape[-2:], wcs, np.int32)
@@ -1869,12 +1900,12 @@ def distance_from(shape, wcs, points, omap=None, odomains=None, domains=False, m
 		dec, ra = posaxes(shape, wcs)
 		if method == "bubble":
 			point_pix = utils.nint(sky2pix(shape, wcs, points))
-			return distances.distance_from_points_bubble_separable(dec, ra, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
+			return cpixell.distance_from_points_bubble_separable(dec, ra, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
 		elif method == "cellgrid":
 			point_pix = utils.nint(sky2pix(shape, wcs, points))
-			return distances.distance_from_points_cellgrid(dec, ra, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
+			return cpixell.distance_from_points_cellgrid(dec, ra, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
 		elif method == "simple":
-			return distances.distance_from_points_simple_separable(dec, ra, points, omap=omap, odomains=odomains, domains=domains)
+			return cpixell.distance_from_points_simple_separable(dec, ra, points, omap=omap, odomains=odomains, domains=domains)
 		else: raise ValueError("Unknown method '%s'" % str(method))
 	else:
 		# We have a general geometry, so we need the full posmap. But to avoid wasting memory we
@@ -1883,20 +1914,20 @@ def distance_from(shape, wcs, points, omap=None, odomains=None, domains=False, m
 			# Not sure how to slice bubble. Just do it in one go for now
 			pos = posmap(shape, wcs, safe=False)
 			point_pix = utils.nint(sky2pix(shape, wcs, points))
-			return distances.distance_from_points_bubble(pos, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
+			return cpixell.distance_from_points_bubble(pos, points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
 		elif method == "cellgrid":
 			pos = posmap(shape, wcs, safe=False)
 			point_pix = utils.nint(sky2pix(shape, wcs, points))
-			return distances.distance_from_points_cellgrid(pos[0], pos[1], points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
+			return cpixell.distance_from_points_cellgrid(pos[0], pos[1], points, point_pix, rmax=rmax, omap=omap, odomains=odomains, domains=domains)
 		elif method == "simple":
 			geo = Geometry(shape, wcs)
 			for y in range(0, shape[-2], step):
 				sub_geo = geo[y:y+step]
 				pos     = posmap(*sub_geo, safe=False)
 				if domains:
-					distances.distance_from_points_simple(pos, points, omap=omap[y:y+step], odomains=odomains[y:y+step], domains=True)
+					cpixell.distance_from_points_simple(pos, points, omap=omap[y:y+step], odomains=odomains[y:y+step], domains=True)
 				else:
-					distances.distance_from_points_simple(pos, points, omap=omap[y:y+step])
+					cpixell.distance_from_points_simple(pos, points, omap=omap[y:y+step])
 			if domains: return omap, odomains
 			else:       return omap
 
@@ -1904,17 +1935,17 @@ def distance_transform_healpix(mask, omap=None, rmax=None, method="heap"):
 	"""Given a boolean healpix mask, produce an output map where the value in each pixel is the distance
 	to the closest false pixel in the mask. See distance_from for the meaning of rmax."""
 	import healpy
-	from pixell import distances
+	from . import cpixell
 	npix  = mask.shape[-1]
 	mflat = mask.reshape(-1,npix)
 	nside = healpy.npix2nside(npix)
-	info  = distances.healpix_info(nside)
+	info  = cpixell.healpix_info(nside)
 	if omap is None: omap = np.zeros(mflat.shape)
 	for i in range(len(mflat)):
-		edge_pix = distances.find_edges_healpix(info, mflat[i])
+		edge_pix = cpixell.find_edges_healpix(info, mflat[i])
 		edge_pos = np.array(healpy.pix2ang(info.nside, edge_pix))
 		edge_pos[0] = np.pi/2-edge_pos[0]
-		distances.distance_from_points_healpix(info, edge_pos, edge_pix, omap=omap[i], rmax=rmax, method=method)
+		cpixell.distance_from_points_healpix(info, edge_pos, edge_pix, omap=omap[i], rmax=rmax, method=method)
 	omap = omap.reshape(mask.shape)
 	# Distance is always zero inside mask
 	omap *= mask
@@ -1925,18 +1956,18 @@ def labeled_distance_transform_healpix(labels, omap=None, odomains=None, rmax=No
 	in each pixel is the distance to the closest nonzero pixel in the labels, as well as a
 	map of which label each pixel was closest to. See distance_from for the meaning of rmax."""
 	import healpy
-	from pixell import distances
+	from . import cpixell
 	npix  = labels.shape[-1]
 	lflat = labels.reshape(-1,npix)
 	nside = healpy.npix2nside(npix)
-	info  = distances.healpix_info(nside)
+	info  = cpixell.healpix_info(nside)
 	if omap is None: omap = np.zeros(lflat.shape)
 	if odomains is None: odomains = np.zeros(lflat.shape)
 	for i in range(len(lflat)):
-		edge_pix = distances.find_edges_labeled_healpix(info, lflat[i])
+		edge_pix = cpixell.find_edges_labeled_healpix(info, lflat[i])
 		edge_pos = np.array(healpy.pix2ang(info.nside, edge_pix))
 		edge_pos[0] = np.pi/2-edge_pos[0]
-		_, domains = distances.distance_from_points_healpix(info, edge_pos, edge_pix, omap=omap[i], domains=True, rmax=rmax, method=method)
+		_, domains = cpixell.distance_from_points_healpix(info, edge_pos, edge_pix, omap=omap[i], domains=True, rmax=rmax, method=method)
 		# Get the edge_pix to label mapping
 		mapping = lflat[i][edge_pix]
 		mask    = domains >= 0
@@ -1956,12 +1987,12 @@ def distance_from_healpix(nside, points, omap=None, odomains=None, domains=False
 	computed up to rmax. Beyond that distance will be set to rmax and domains to -1.
 	This can be used to speed up the calculation when one only cares about nearby areas."""
 	import healpy
-	from pixell import distances
-	info = distances.healpix_info(nside)
+	from . import cpixell
+	info = cpixell.healpix_info(nside)
 	if omap is None: omap = np.empty(info.npix)
 	if domains and odomains is None: odomains = np.empty(info.npix, np.int32)
 	pixs = utils.nint(healpy.ang2pix(nside, np.pi/2-points[0], points[1]))
-	return distances.distance_from_points_healpix(info, points, pixs, rmax=rmax, omap=omap, odomains=odomains, domains=domains, method=method)
+	return cpixell.distance_from_points_healpix(info, points, pixs, rmax=rmax, omap=omap, odomains=odomains, domains=domains, method=method)
 
 def grow_mask(mask, r):
 	"""Grow the True part of boolean mask "mask" by a distance of r radians"""
@@ -2250,7 +2281,7 @@ def stamps(map, pos, shape, aslist=False):
 	res = samewcs(np.array(res),res[0])
 	return res
 
-def to_healpix(imap, omap=None, nside=0, order=3, chunk=100000, destroy_input=False):
+def to_healpix(imap, omap=None, nside=0, mode="spline", order=3, chunk=100000, destroy_input=False):
 	"""Project the enmap "imap" onto the healpix pixelization. If omap is given,
 	the output will be written to it. Otherwise, a new healpix map will be constructed.
 	The healpix map must be in RING order. nside controls the resolution of the output map.
@@ -2263,8 +2294,8 @@ def to_healpix(imap, omap=None, nside=0, order=3, chunk=100000, destroy_input=Fa
 	warnings.warn("enmap.to_healpix is deprecated. Reprojecting this way is error-prone due to the potential loss of information, and the (very small) loss of high-l power due to the use of spline interpolation. Use reproject.map2healpix instead. And read its docstring!")
 	import healpy
 	if not destroy_input and order > 1: imap = imap.copy()
-	if order > 1:
-		imap = utils.interpol_prefilter(imap, order=order, inplace=True)
+	interpolator = utils.interpolator(imap, npre=-2, mode=mode, order=order)
+	assert interpolator.prefiltered, "Banding only makes sense for prefiltered interpolators"
 	if omap is None:
 		# Generate an output map
 		if not nside:
@@ -2280,7 +2311,7 @@ def to_healpix(imap, omap=None, nside=0, order=3, chunk=100000, destroy_input=Fa
 		pos   = np.array(healpy.pix2ang(nside, np.arange(i, min(npix,i+chunk))))
 		# Healpix uses polar angle, not dec
 		pos[0] = np.pi/2 - pos[0]
-		omap[...,i:i+chunk] = imap.at(pos, order=order, mask_nan=False, prefilter=False)
+		omap[...,i:i+chunk] = imap.at(pos, interpolator=interpolator)
 	return omap
 
 def to_flipper(imap, omap=None, unpack=True):
@@ -2803,7 +2834,7 @@ def ifftshift(map, inplace=False):
 def fillbad(map, val=0, inplace=False):
 	return np.nan_to_num(map, copy=not inplace, nan=val, posinf=val, neginf=val)
 
-def resample(map, oshape, off=(0,0), method="fft", mode="wrap", corner=False, order=3):
+def resample(map, oshape, off=(0,0), method="fft", border="wrap", corner=False, order=3):
 	"""Resample the input map such that it covers the same area of the sky
 	with a different number of pixels given by oshape."""
 	# Construct the output shape and wcs
@@ -2817,7 +2848,7 @@ def resample(map, oshape, off=(0,0), method="fft", mode="wrap", corner=False, or
 			off -= 0.5 - 0.5*np.array(oshape[-2:],float)/map.shape[-2:] # in output units
 		opix  = pixmap(oshape) - off[:,None,None]
 		ipix  = opix * (np.array(map.shape[-2:],float)/oshape[-2:])[:,None,None]
-		omap  = ndmap(map.at(ipix, unit="pix", mode=mode, order=order), owcs)
+		omap  = ndmap(map.at(ipix, unit="pix", mode="spline", border=border, order=order), owcs)
 	else:
 		raise ValueError("Invalid resample method '%s'" % method)
 	return omap
@@ -2871,6 +2902,13 @@ def resample_fft(fimap, oshape, fomap=None, off=(0,0), corner=False, norm="pix",
 		# it's faster to do so in the fimap. And for a mix it's bad to do it both places.
 		fomap[:] = enfft.shift(fomap, off, axes=(-2,-1), nofft=True)
 	return fomap
+
+def interpolator(emap, mode="spline", order=3, border="constant", cval=0.0, epsilon=None):
+	"""Return an interpolator object that can be used to interpolate the given map. This can
+	be passed to enmap.project() and enmap.at() to speed up repeated calls on the same map.
+	When doing so, this object overrides the other interpolation-related arguments you pass
+	to these functions (mode, order, etc.)"""
+	return utils.interpolator(emap, npre=-2, mode=mode, order=order, border=border, cval=cval, epsilon=epsilon)
 
 def spin_helper(spin, n):
 	spin  = np.array(spin).reshape(-1)

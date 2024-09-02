@@ -426,6 +426,82 @@ def resample_fft(fa, n, out=None, axes=-1, norm=1, op=lambda a,b:b):
 		transfer(out[sel], fa[sel], norm, op)
 	return out
 
+def interpol_nufft(a, inds, out=None, axes=None, normalize=True,
+		periodicity=None, epsilon=None, nthread=None, nofft=False):
+	"""Given some array a[{pre},{dims}] interpolate it at the given
+	inds[len(dims),{post}], resulting in an output with shape [{pre},{post}].
+	The signal is assumed to be periodic with the size of a unless this is overridden
+	with the periodicity argument, which should have an integer for each axis being
+	transformed. Normally the last ndim = len(inds) axes of a are interpolated.
+	This can be overridden with the axes argument.
+
+	By default the interpolation is properly normalized. This can be turned off
+	with the normalization argument, in which case the output will be too high
+	by a factor of np.prod([a.shape[ax] for ax in axes]). If all axes are used,
+	this simplifies to a.size"""
+	return u2nu(a, inds, out=out, axes=axes, periodicity=periodicity,
+		epsilon=epsilon, nthread=nthread, normalize=normalize, _needfft=not nofft)
+
+def u2nu(fa, inds, out=None, axes=None, periodicity=None, epsilon=None, nthread=None,
+			normalize=False, _needfft=False):
+	"""Given complex fourier coefficients fa[{pre},{dims}] corresponding to
+	some real-space array a, evaluate the real-space signal at the given
+	inds[len(dims),{post}], resulting in a real output with shape [{pre},{post}].
+	The signal is assumed to be periodic with the size of a unless this is overridden
+	with the periodicity argument, which should have an integer for each axis being
+	transformed. Normally the last ndim = len(inds) axes of fa are transformed.
+	This can be overridden with the axes argument.
+
+	This transform is unnormalized. If fa was produced using fft(a), then
+	the output from u2nu should be divided by np.prod([fa.shape[ax] for ax in axes]).
+	If all axes are used, then this simplifies to fa.size.
+	"""
+	fa    = np.asarray(fa)
+	inds  = np.asarray(inds)
+	# Handle other data types
+	if _needfft:
+		if fa.dtype not in [np.float32,np.float64]:
+			fa = fa.astype(np.float64)
+	else:
+		if fa.dtype not in [np.complex64,np.complex128]:
+			fa = fa.astype(np.complex128)
+	if inds.dtype not in [np.float32,np.float64]:
+		inds = inds.astype(np.float64)
+	# Support doing this for an arbitrary subset of axes
+	if axes is not None:
+		fa = np.moveaxis(fa, axes, [fa.ndim-len(axes)+i for i in range(len(axes))])
+	ndim  = inds.shape[0]
+	npre  = fa.ndim-ndim
+	if npre < 0: raise ValueError("fa must has at least as many dimensions as indexed by the first axis of inds!")
+	# Periodicity of the full space. Allows us to support arrays that represent
+	# a subset of a bigger, periodic array
+	if periodicity is None: periodicity = np.array(fa.shape[-ndim:])
+	else: periodicity = np.zeros(ndim,int)+periodicity
+	nthread = nthread or nthread_fft
+	# Target accuracy
+	if epsilon is None:
+		epsilon = 1e-5 if fa.dtype == np.complex64 else 1e-12
+	# ducc wants just a single pre-dimension for inds, so flatten it.
+	iflat = inds.reshape(ndim,-1).T
+	# Output array. Allocating it like this lets it inherit any subclass of
+	# inds, which is useful when interpolating an enmap with another enmap
+	if out is None:
+		out = np.zeros_like(inds, shape=fa.shape[:npre]+inds.shape[1:], dtype=utils.real_dtype(fa.dtype))
+	if out.shape != fa.shape[:npre]+inds.shape[1:]:
+		raise ValueError("out must have shape fa.shape[:npre]+inds.shape[1:]")
+	if out.dtype != utils.real_dtype(fa.dtype):
+		raise ValueError("out.dtype must equal fa.real.dtype")
+	# Do the actual looping
+	lastaxes = tuple(range(-ndim,0))
+	for I in utils.nditer(fa.shape[:npre]):
+		grid = fa[I] if not _needfft else fft(fa[I], axes=lastaxes, nthread=nthread)
+		out[I] = ducc0.nufft.u2nu(grid=grid, coord=iflat, forward=False,
+			epsilon=epsilon, nthreads=nthread, periodicity=periodicity,
+			fft_order=True).real.reshape(inds.shape[1:])
+	if normalize:
+		out /= np.prod(fa.shape[npre:])
+	return out
+
 def fft_flat(tod, ft, nthread=1, axes=[-1], flags=None, _direction="FFTW_FORWARD"):
 	"""Workaround for intel FFTW wrapper. Flattens appropriate dimensions of
 	intput and output arrays to avoid crash that otherwise happens for arrays with

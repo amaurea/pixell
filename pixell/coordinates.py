@@ -121,7 +121,7 @@ def transform_meta(transfun, coords, fields=["ang","mag"], offset=5e-7):
 		res.mag = (tri_area(diff).T/tri_area(offsets[1:]-offsets[0]).T).T
 	return res
 
-def transform_raw(from_sys, to_sys, coords, time=None, site=default_site, bore=None):
+def transform_raw(from_sys, to_sys, coords, time=None, site=None, bore=None):
 	"""Transforms coords[2,...] from system from_sys to system to_sys, where
 	systems can be "hor", "cel" or "gal". For transformations involving
 	"hor", the optional arguments time (in modified julian days) and site (which must
@@ -131,21 +131,16 @@ def transform_raw(from_sys, to_sys, coords, time=None, site=default_site, bore=N
 
 	coords and time will be broadcast such that the result has the same shape
 	as coords*time[None]."""
+	if site is None: site = default_site
 	# Prepare input and output arrays
-	if time is None:
-		coords = np.array(coords)[:2]
-	else:
-		time   = np.asarray(time)
-		coords = np.asarray(coords)
-		# Broadasting. A bit complicated because we want to handle
-		# both time needing to broadcast and coords needing to
-		time   = time + np.zeros(coords[0].shape,time.dtype)
-		coords = (coords.T + np.zeros(time.shape,coords.dtype)[None].T).T
+	coords, time, bore = utils.broadcast_arrays(coords, time, bore, npre=[1,0,1])
 	# flatten, so the rest of the code can assume that coordinates are [2,N]
 	# and time is [N]
 	oshape = coords.shape
-	coords= np.ascontiguousarray(coords.reshape(2,-1))
+	coords = np.require(coords.reshape(2,-1), requirements=['C','W'])
 	if time is not None: time = time.reshape(-1)
+	if bore is not None:
+		bore = bore.reshape(bore.shape[0],-1)
 	# Perform the actual coordinate transformation. There are three classes of
 	# transformations here:
 	# 1. To/from object-centered coordinates
@@ -216,9 +211,9 @@ def transform_euler(euler, coords, pol=None, mag=None):
 
 def hor2cel(coord, time, site, copy=True):
 	from enlib.coordinates import pyfsla
-	from enlib.coordinates import iers
+	from enlib import iers
 	coord  = np.array(coord, copy=copy)
-	trepr  = time[len(time)/2]
+	trepr  = time[len(time)//2]
 	info   = iers.lookup(trepr)
 	ao = pyfsla.sla_aoppa(trepr, info.dUT, site.lon*utils.degree, site.lat*utils.degree, site.alt,
 		info.pmx*utils.arcsec, info.pmy*utils.arcsec, site.T, site.P, site.hum,
@@ -230,10 +225,10 @@ def hor2cel(coord, time, site, copy=True):
 
 def cel2hor(coord, time, site, copy=True):
 	from enlib.coordinates import pyfsla
-	from enlib.coordinates import iers
+	from enlib import iers
 	# This is very slow for objects near the horizon!
 	coord  = np.array(coord, copy=copy)
-	trepr  = time[len(time)/2]
+	trepr  = time[len(time)//2]
 	info   = iers.lookup(trepr)
 	ao = pyfsla.sla_aoppa(trepr, info.dUT, site.lon*utils.degree, site.lat*utils.degree, site.alt,
 		info.pmx*utils.arcsec, info.pmy*utils.arcsec, site.T, site.P, site.hum,
@@ -246,10 +241,12 @@ def cel2hor(coord, time, site, copy=True):
 def tele2hor(coord, site, copy=True):
 	coord = np.array(coord, copy=copy)
 	coord = euler_rot([site.base_az*utils.degree, site.base_tilt*utils.degree, -site.base_az*utils.degree], coord)
+	coord = apply_azslope(coord, site, copy=False)
 	return coord
 
 def hor2tele(coord, site, copy=True):
 	coord = np.array(coord, copy=copy)
+	coord = unapply_azslope(coord, site, copy=False)
 	coord = euler_rot([site.base_az*utils.degree, -site.base_tilt*utils.degree, -site.base_az*utils.degree], coord)
 	return coord
 
@@ -283,33 +280,122 @@ def euler_rot(euler_angles, coords, kind="zyz"):
 	M      = euler_mat(euler_angles, kind)
 	rect   = utils.ang2rect(co, False)
 	rect   = np.einsum("...ij,j...->i...",M,rect)
-	co     = utils.rect2ang(rect, False)
+	co     = utils.rect2ang(rect, zenith=False)
 	return co.reshape(coords.shape)
 
-def recenter(angs, center, restore=False):
-	"""Recenter coordinates "angs" (as ra,dec) on the location given by "center",
-	such that center moves to the north pole."""
-	# Performs the rotation E(0,-theta,-phi). Originally did
-	# E(phi,-theta,-phi), but that is wrong (at least for our
-	# purposes), as it does not preserve the relative orientation
-	# between the boresight and the sun. For example, if the boresight
-	# is at the same elevation as the sun but 10 degrees higher in az,
-	# then it shouldn't matter what az actually is, but with the previous
-	# method it would.
-	#
-	# Now supports specifying where to recenter by specifying center as
-	# lon_from,lat_from,lon_to,lat_to
-	if len(center) == 4: ra0, dec0, ra1, dec1 = center
-	elif len(center) == 2: ra0, dec0, ra1, dec1 = center[0], center[1], center[0]*0, center[1]*0+np.pi/2
-	if restore: ra1 += ra0
-	return euler_rot([ra1,dec0-dec1,-ra0], angs, kind="zyz")
+#def matmul(*mats):
+#	res = mats[0]
+#	for M in mats[1:]:
+#		res = np.einsum("...ab,...bc->...ac", res, M)
+#	return res
+
+def rotmat_recenter(cfrom, cto, cup=None):
+	"""Build a coordinate transformation matrix M[...,3,3] that
+	takes the point cfrom[{ra,dec},...] to the new position cto[{ra,dec},...].
+	cup[{ra,dec},...] controls the orientation of the new coordinate system:
+	After the rotation, cup will be directly polewards from cto.
+	cfrom, cto and cup must have broadcastable shapes"""
+	# Normalize shapes
+	arrays = [cfrom,cto] if cup is None else [cfrom,cto,cup]
+	arrays = np.broadcast_arrays(*arrays)
+	ishape = arrays[0].shape[1:]
+	arrays = [a.reshape(2,-1) for a in arrays]
+	cfrom, cto = arrays[:2]
+	if cup is not None:
+		cup = np.array(arrays[2])
+		# 1. Rotate cfrom[ra] to 0:
+		R     = utils.rotmatrix(-cfrom[0], "z")
+		cup[0] -= cfrom[0]
+		# 2. Rotate cfrom[dec] to the pole
+		Rtmp  = utils.rotmatrix(cfrom[1]-np.pi/2, "y")
+		R     = np.matmul(Rtmp, R)
+		cup = utils.rect2ang(np.einsum("...ij,j...->i...", Rtmp, utils.ang2rect(cup)))
+		# 3. Rotate cup[ra] to pi. This does not affect cfrom, since it's currenlty at the pole
+		R     = np.matmul(utils.rotmatrix(np.pi-cup[0], "z"), R)
+		# 4. Rotate cfrom to its target declination and RA
+		R     = np.matmul(utils.rotmatrix(np.pi/2-cto[1], "y"), R)
+		R     = np.matmul(utils.rotmatrix(cto[0], "z"), R)
+	else:
+		R     = euler_mat([cto[0], cfrom[1]-cto[1], -cfrom[0]], "zyz")
+	# Restore shape
+	R     = R.reshape(ishape + (3,3))
+	return R
+
+def rotmat_decenter(cfrom, cto, cup):
+	return np.einsum("...ab->...ba", rotmat_recenter(cfrom, cto, cup))
+
+def apply_rotmat(M, coords):
+	"""Multiply coords[{ra,dec},...] with cartesian rotation matrix M[...,3,3]"""
+	return utils.rect2ang(np.einsum("...ij,j...->i...", M, utils.ang2rect(coords)))
+
+#def recenter(angs, center, restore=False):
+#	"""Recenter coordinates "angs" (as ra,dec) on the location given by "center",
+#	such that center moves to the north pole."""
+#	# Performs the rotation E(0,-theta,-phi). Originally did
+#	# E(phi,-theta,-phi), but that is wrong (at least for our
+#	# purposes), as it does not preserve the relative orientation
+#	# between the boresight and the sun. For example, if the boresight
+#	# is at the same elevation as the sun but 10 degrees higher in az,
+#	# then it shouldn't matter what az actually is, but with the previous
+#	# method it would.
+#	#
+#	# Now supports specifying where to recenter by specifying center as
+#	# lon_from,lat_from,lon_to,lat_to
+#	if len(center) == 4: ra0, dec0, ra1, dec1 = center
+#	elif len(center) == 2: ra0, dec0, ra1, dec1 = center[0], center[1], center[0]*0, center[1]*0+np.pi/2
+#	if restore: ra1 += ra0
+#	return euler_rot([ra1,dec0-dec1,-ra0], angs, kind="zyz")
+
+def recenter(angs, center, restore=False, inverse=False):
+	"""Recenter coordinates "angs" (as ra,dec) on the location given by "center" """
+	center = np.array(center)
+	cfrom  = center[:2]
+	zero   = cfrom[0]*0
+	cto    = center[2:4] if len(center) >= 4 else np.array([zero, zero+np.pi/2])
+	cup    = center[4:6] if len(center) >= 6 else None
+	if restore: cto[0] += cfrom[0] # what was this again?
+	M = rotmat_recenter(cfrom, cto, cup)
+	if inverse: M = np.einsum("...ab->...ba", M)
+	return apply_rotmat(M, angs)
+
+#def decenter(angs, center, restore=False):
+#	"""Inverse operation of recenter."""
+#	if len(center) == 4: ra0, dec0, ra1, dec1 = center
+#	elif len(center) == 2: ra0, dec0, ra1, dec1 = center[0], center[1], center[0]*0, center[1]*0+np.pi/2
+#	if restore: ra1 += ra0
+#	return euler_rot([ra0,dec1-dec0,-ra1],  angs, kind="zyz")
 
 def decenter(angs, center, restore=False):
-	"""Inverse operation of recenter."""
-	if len(center) == 4: ra0, dec0, ra1, dec1 = center
-	elif len(center) == 2: ra0, dec0, ra1, dec1 = center[0], center[1], center[0]*0, center[1]*0+np.pi/2
-	if restore: ra1 += ra0
-	return euler_rot([ra0,dec1-dec0,-ra1],  angs, kind="zyz")
+	"""Recenter coordinates "angs" (as ra,dec) on the location given by "center" """
+	return recenter(angs, center, restore=restore, inverse=True)
+
+# az-dependent pointing offset. Used in tele<->hor if site demands it.
+# To go from azslope_x/y to azslope_az/el, we can use bore2tele(azslope_xy, [0,el])-[0,el]
+# Instead of putting the az slope into the pointing offset file, requireing a new pointing
+# offset format, I think it's cleaner to make it a separate file, which one can optionally
+# read in if one supports it. That way the pointing offsets can stay in the standard format.
+
+def apply_azslope(coord, site, copy=True):
+	if "azslope_az0" not in site: return coord
+	coord    = np.array(coord, copy=copy)
+	az0      = site.azslope_az0*utils.degree
+	daz      = utils.rewind(coord[0], ref=az0)-az0
+	coord[0]+= site.azslope_daz*utils.arcmin/utils.degree*daz
+	coord[1]+= site.azslope_del*utils.arcmin/utils.degree*daz
+	return coord
+
+def unapply_azslope(coord, site, copy=True):
+	if "azslope_az0" not in site: return coord
+	coord    = np.array(coord, copy=copy)
+	az0      = site.azslope_az0*utils.degree
+	odaz     = utils.rewind(coord[0], ref=az0)-az0
+	# odaz = daz*(1+A) => daz = odaz/(1+A)
+	A        = site.azslope_daz*utils.arcmin/utils.degree
+	daz      = odaz/(1+A)
+	coord[0]  = daz + az0
+	coord[1] -= site.azslope_del*utils.arcmin/utils.degree*daz
+	return coord
+
 
 def nohor(sys): return sys if sys not in ["altaz","tele","bore"] else "icrs"
 def getsys(sys): return str2sys[sys.lower()] if isinstance(sys,basestring) else sys
@@ -343,6 +429,24 @@ def getsys_full(sys, time=None, site=default_site, bore=None):
 	centering instead of object-oriented centering. This will result in
 	a coordinate system where the boresight has the zenith-mirrored
 	position of what the object would have in zenith-relative coordinates.
+
+	One can also specify the transformation manually with full coordinates.
+	This has a really inconvenient and unintuitive syntax:
+	 [base, [fromto, sidelobe]]
+	fromto is [ra_from[:],dec_from[:],ra_to[:],dec_to[:]], and specifies that for
+	each sample, rotate the sky such that the coordinates [ra_from,dec_from]
+	are taken to [ra_to,dec_to]. Base is the coordinate system name, e.g. "equ",
+	and specifies the meaning of "ra" and "dec" above, as well as which direction
+	will be "up" (just giving from/to is not enough to fully specify the coordinate
+	system). sidelobe specifies whether to use the sidelobe hack. It would usually be
+	False.
+
+	Here's a full example of the manual syntax, for the case of a drone-centered
+	coordinate system where the drone has a constant tilt in horizontal coordinates
+	(variable tilt is not supported - yet another problem with this system). Let
+	the drone's horizontal coordinates be drone_hor[{az,el},:]. Then
+	 sys_dronecentered = ["hor",[np.concatenate([drone_hor,drone_hor*0],0),False]]
+	Bleh!
 	"""
 	if isinstance(sys, basestring): sys = sys.split(":",1)
 	else:
@@ -365,7 +469,7 @@ def getsys_full(sys, time=None, site=default_site, bore=None):
 		# for from_sys,to_sys uses for backwards compatibility with
 		# existing programs.
 		ref_expanded = []
-		for ref_refsys in ref.split("/"):
+		for ref_refsys in utils.split_esc(ref, "/"):
 			# In our first format, ref is a set of coordinates in degrees
 			toks = ref_refsys.split(":")
 			r = toks[0]
@@ -375,9 +479,17 @@ def getsys_full(sys, time=None, site=default_site, bore=None):
 				assert(r.ndim == 1 and len(r) == 2)
 				r = transform_raw(refsys, base, r[:,None], time=time, site=site, bore=bore)
 			except ValueError:
-				# Otherwise, treat as an ephemeris object
-				r = ephem_pos(r, time)
-				r = transform_raw("equ", base, r, time=time, site=site, bore=bore)
+				# Ok, so it's not a hardcoded set of coordinates.
+				# Does it start with an @? If so it's a file with [ctime, ra, dec]
+				if r.startswith("@"):
+					posdata = np.loadtxt(r[1:], usecols=(0,1,2), ndmin=2).T
+					# Interpolate to target time
+					r = utils.interp(time, utils.ctime2mjd(posdata[0]), posdata[1:]*utils.degree)
+					r = transform_raw(refsys, base, r, time=time, site=site, bore=bore)
+				else:
+					# Otherwise, it's the name of an ephemeris object
+					r = ephem_pos(r, time)
+					r = transform_raw("equ", base, r, time=time, site=site, bore=bore)
 			ref_expanded += list(r)
 			prevsys = refsys
 		ref_coords = np.array(ref_expanded)
@@ -409,7 +521,7 @@ def interpol_pos(from_sys, to_sys, name_or_pos, mjd, site=default_site, dt=10):
 	each mjd. The mjds are assumed to be sampled densely enough that
 	interpolation will work. For ephemeris objects, positions are
 	computed in steps of 10 seconds by default (controlled by the dt argument)."""
-	box  = utils.widen_box([np.min(mjd),np.max(mjd)], 1e-2)
+	box  = utils.widen_box([np.min(mjd),np.max(mjd)], 1e-2, relative=True)
 	sub_nsamp = max(3,int((box[1]-box[0])*24.*3600/dt))
 	sub_mjd = np.linspace(box[0], box[1], sub_nsamp, endpoint=True)
 	if isinstance(name_or_pos, basestring):
@@ -422,7 +534,7 @@ def interpol_pos(from_sys, to_sys, name_or_pos, mjd, site=default_site, dt=10):
 	sub_pos = transform_raw(from_sys, to_sys, sub_from, time=sub_mjd, site=site)
 	sub_pos[1] = utils.rewind(sub_pos[1], ref="auto")
 	inds = (mjd-box[0])*(sub_nsamp-1)/(box[1]-box[0])
-	full_pos= utils.interpol(sub_pos, inds[None], order=3)
+	full_pos= utils.interpol(sub_pos, inds[None], mode="spline", order=3)
 	return full_pos
 
 def make_mapping(dict): return {value:key for key in dict for value in dict[key]}

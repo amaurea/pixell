@@ -1,14 +1,15 @@
 module fortran
-
+	use iso_c_binding
+	implicit none
 	private :: map_border, calc_weights
 
 contains
 
 pure function sinc(x)
 	implicit none
-	real(_), intent(in) :: x
-	real(_) :: sinc, y
-	real(_), parameter :: cut = 1e-4, pi = 3.14159265358979323846d0
+	real(c_float), intent(in) :: x
+	real(c_float) :: sinc, y
+	real(c_float), parameter :: cut = 1e-4, pi = 3.14159265358979323846d0
 	y = abs(pi*x)
 	if(y < cut) then
 		sinc = 1 - y**2/6 + y**4/120
@@ -19,9 +20,9 @@ end function
 
 pure function dsinc(x)
 	implicit none
-	real(_), intent(in) :: x
-	real(_) :: dsinc, y
-	real(_), parameter :: cut = 1e-4, pi = 3.14159265358979323846d0
+	real(c_float), intent(in) :: x
+	real(c_float) :: dsinc, y
+	real(c_float), parameter :: cut = 1e-4, pi = 3.14159265358979323846d0
 	y = abs(pi*x)
 	if(y < cut) then
 		dsinc = -sin(y)/2
@@ -86,17 +87,16 @@ end function
 ! seems to implement the algorithm described here:
 ! http://users.fmrib.ox.ac.uk/~jesper/papers/future_readgroups/unser9302.pdf
 ! It assumes *mirrored* boundary conditions, not cyclic!
-subroutine spline_filter1d(data, dims, axis, order, border, trans)
+subroutine spline_filter1d(data, dims, axis, ndim, ndata, order, border, trans) bind(c)
 	implicit none
-	real(_), intent(inout) :: data(:)
-	integer, intent(in)    :: dims(:), axis, order, border
-	logical, intent(in)    :: trans
-	real(_), allocatable   :: a(:)
-	real(_), parameter     :: tolerance = 1d-15
-	real(_) :: pole(2), p, weight, pn, p2n, ip, q, v
-	integer :: ndim, nblock, noff, n, oi, bi, i, pind, m, npole, pi1, pi2, dpi
+	real(c_float), intent(inout)     :: data(ndata)
+	integer(c_int), intent(in) :: dims(ndim)
+	integer(c_int), value      :: axis, order, border, trans, ndim, ndata
+	real(c_float), allocatable   :: a(:)
+	real(c_float), parameter     :: tolerance = 1d-15
+	real(c_float) :: pole(2), p, weight, pn, p2n, ip, q, v
+	integer :: nblock, noff, n, oi, bi, i, pind, m, npole, pi1, pi2, dpi
 
-	ndim   = size(dims)
 	n      = dims(axis+1)
 	nblock = product(dims(1:axis))
 	noff   = product(dims(axis+2:ndim))
@@ -113,7 +113,7 @@ subroutine spline_filter1d(data, dims, axis, order, border, trans)
 		case default; return
 	end select
 	weight = product((1-pole(1:npole))*(1-1/pole(1:npole)))
-	if(.not. trans) then
+	if(trans .eq. 0) then
 		pi1 = 1; pi2 = npole; dpi = 1
 	else
 		pi1 = npole; pi2 = 1; dpi =-1;
@@ -132,7 +132,7 @@ subroutine spline_filter1d(data, dims, axis, order, border, trans)
 				! scipy ni_interpolation.c:273. Now it is generalized
 				! to support other boundary conditions, as given in
 				! https://lorensen.github.io/VTKCodeCoverage/VTK/Imaging/Core/vtkImageBSplineInternals.cxx.gcov.html
-				if(.not. trans) then
+				if(trans .eq. 0) then
 					! Non-transposed case
 					! First initialize the causal filter, which is divided into two cases based on
 					! the length of the array. We handle four different initial conditions:
@@ -280,10 +280,10 @@ pure subroutine calc_weights(type, order, p, weights, off)
 	implicit none
 	integer, intent(in)    :: type, order
 	integer, intent(inout) :: off(:)
-	real(_), intent(in)    :: p(:)
-	real(_), intent(inout) :: weights(:,:)
+	real(c_float), intent(in)    :: p(:)
+	real(c_float), intent(inout) :: weights(:,:)
 	integer :: ndim, nw, i, j
-	real(_) :: x
+	real(c_float) :: x
 	ndim = size(weights, 2)
 	nw   = size(weights, 1)
 	! Speed up nearest neighbor
@@ -338,10 +338,10 @@ pure subroutine calc_weights_deriv(type, order, p, weights, off)
 	implicit none
 	integer, intent(in)    :: type, order
 	integer, intent(inout) :: off(:)
-	real(_), intent(in)    :: p(:)
-	real(_), intent(inout) :: weights(:,:)
+	real(c_float), intent(in)    :: p(:)
+	real(c_float), intent(inout) :: weights(:,:)
 	integer :: ndim, nw, i, j
-	real(_) :: x, sgn
+	real(c_float) :: x, sgn
 	ndim = size(weights, 2)
 	nw   = size(weights, 1)
 	! Speed up nearest neighbor
@@ -439,23 +439,23 @@ end function
 !  3: mirror
 ! trans indicates the transpose operation. In this case the data flow direction
 ! also changes, so idata will be modified based on odata.
-subroutine interpol(idata, ishape, odata, pos, type, order, border, trans)
+subroutine interpol(idata, ishape, odata, pos, npre, ndim, ngrid, nsamp, type, order, border, trans) bind(c)
 	implicit none
-	real(_), intent(inout) :: idata(:,:), odata(:,:)
-	real(_), intent(in)    :: pos(:,:)
-	integer, intent(in)    :: ishape(:), type, order, border
-	logical, intent(in)    :: trans
-	real(_), allocatable   :: weights(:,:)
-	real(_) :: v(size(idata,2)), res(size(idata,2))
+	real(c_float), intent(inout) :: idata(ngrid,npre), odata(nsamp,npre)
+	real(c_float), intent(in)    :: pos(nsamp,ndim)
+	integer(c_int), intent(in) :: ishape(ndim)
+	integer(c_int), value  :: npre, ndim, ngrid, nsamp, type, order, border, trans
+	real(c_float), allocatable   :: weights(:,:)
+	real(c_float) :: v(size(idata,2)), res(size(idata,2))
 	integer :: off(size(pos,2)), inds(size(pos,2))
-	integer :: xi, si, ci, i, j, dind, ndim, nsamp, nw, npre, ncon, n
+	integer :: xi, si, ci, i, j, dind, nw, ncon, n
 
 	ndim  = size(pos,2)
 	nsamp = size(pos,1)
 	npre  = size(idata,2)
 	nw    = get_weight_length(type, order)
 	ncon  = nw**ndim
-	if(trans) idata = 0
+	if(trans .ne. 0) idata = 0
 	!$omp parallel private(si,weights,off,res,inds,ci,dind,i,xi,v,j,n)
 	allocate(weights(nw,ndim))
 	!$omp do
@@ -468,7 +468,7 @@ subroutine interpol(idata, ishape, odata, pos, type, order, border, trans)
 		!  D10*W10*W01 D11*W10*W11 D12*W10*W21
 		!  D20*W20*W01 D21*W20*W11 D22*W20*W21
 		! So loop through each cell of context
-		if(.not. trans) res  = 0
+		if(trans .eq. 0) res  = 0
 		inds = 0
 		cloop: do ci = 1, ncon
 			! Get the value of this cell of context, taking into
@@ -484,7 +484,7 @@ subroutine interpol(idata, ishape, odata, pos, type, order, border, trans)
 				if(xi < 0) cycle cloop
 				dind = dind * n + xi
 			end do
-			if(.not. trans) then
+			if(trans .eq. 0) then
 				! Standard interpolation
 				v = idata(dind+1,:)
 				! Now multiply this value by all the relevant weights, one
@@ -511,7 +511,7 @@ subroutine interpol(idata, ishape, odata, pos, type, order, border, trans)
 				inds(i) = 0
 			end do
 		end do cloop
-		if(.not. trans) odata(si,:) = res
+		if(trans .eq. 0) odata(si,:) = res
 	end do
 	deallocate(weights)
 	!$omp end parallel
@@ -524,23 +524,23 @@ end subroutine
 ! 1st order: Derivative has nonsensical values at exact integer positions, where
 !            the derivative changes discontinuously. It's broken even if the
 !            derivative on each side is the same.
-subroutine interpol_deriv(idata, ishape, odata, pos, type, order, border, trans)
+subroutine interpol_deriv(idata, ishape, odata, pos, npre, ndim, ngrid, nsamp, type, order, border, trans) bind(c)
 	implicit none
-	real(_), intent(inout) :: idata(:,:), odata(:,:,:) ! (ngrid,npre) and (npoint,npre,ndim)
-	real(_), intent(in)    :: pos(:,:)                 ! (npoint,ndim)
-	integer, intent(in)    :: ishape(:), type, order, border
-	logical, intent(in)    :: trans
-	real(_), allocatable   :: weights(:,:), dweights(:,:)
-	real(_) :: v(size(idata,2)), res(size(idata,2),size(pos,2)) ! (npre), (npre,ndim)
+	real(c_float), intent(inout) :: idata(ngrid,npre), odata(nsamp,npre,ndim) ! (ngrid,npre) and (npoint,npre,ndim)
+	real(c_float), intent(in)    :: pos(nsamp,ndim)                 ! (npoint,ndim)
+	integer(c_int), intent(in) :: ishape(ndim)
+	integer(c_int), value  :: npre, ndim, ngrid, nsamp, type, order, border, trans
+	real(c_float), allocatable   :: weights(:,:), dweights(:,:)
+	real(c_float) :: v(size(idata,2)), res(size(idata,2),size(pos,2)) ! (npre), (npre,ndim)
 	integer :: off(size(pos,2)), inds(size(pos,2))
-	integer :: xi, si, ci, i, j, dind, ndim, nsamp, nw, npre, ncon, n
+	integer :: xi, si, ci, i, j, dind, nw, ncon, n
 
 	ndim  = size(pos,2)
 	nsamp = size(pos,1)
 	npre  = size(idata,2)
 	nw    = get_weight_length(type, order)
 	ncon  = nw**ndim
-	if(trans) idata = 0
+	if(trans .ne. 0) idata = 0
 	!$omp parallel private(si,weights,dweights,off,res,inds,ci,dind,i,xi,v,j,n)
 	allocate(weights(nw,ndim),dweights(nw,ndim))
 	!$omp do
@@ -554,7 +554,7 @@ subroutine interpol_deriv(idata, ishape, odata, pos, type, order, border, trans)
 		!  D10*W10*W01 D11*W10*W11 D12*W10*W21
 		!  D20*W20*W01 D21*W20*W11 D22*W20*W21
 		! So loop through each cell of context
-		if(.not. trans) res  = 0
+		if(trans .eq. 0) res  = 0
 		inds = 0
 		cloop: do ci = 1, ncon
 			! Get the value of this cell of context, taking into
@@ -569,7 +569,7 @@ subroutine interpol_deriv(idata, ishape, odata, pos, type, order, border, trans)
 				if(xi < 0) cycle cloop
 				dind = dind * n + xi
 			end do
-			if(.not. trans) then
+			if(trans .eq. 0) then
 				! Standard interpolation
 				v = idata(dind+1,:)
 				! Now multiply this value by all the relevant weights, one
@@ -606,188 +606,7 @@ subroutine interpol_deriv(idata, ishape, odata, pos, type, order, border, trans)
 				inds(i) = 0
 			end do
 		end do cloop
-		if(.not. trans) odata(si,:,:) = res
-	end do
-	deallocate(weights, dweights)
-	!$omp end parallel
-end subroutine
-
-!!!!!!! Obsolete stuff below !!!!!!!
-
-! pos[ndim,nout] has indices into pre-flattened idata. nout = product(oshape)
-! type indicates the type of interpolation to use. 0 is convolution, 1 is
-! spline and 2 is lanczos. border indicates how to handle borders. 0 is
-! constant zero value, 1 is nearest, 2 is cyclic and 3 is mirrored. trans indicates
-! the transpose operation. It only makes sense when interpolate is a linear operation,
-! which it is as long as one doesn't use constant boundary values.
-subroutine interpol_old(idata, ishape, odata, pos, type, order, border, trans)
-	implicit none
-	real(_), intent(inout) :: idata(:,:), odata(:,:)
-	real(_), intent(in)    :: pos(:,:)
-	integer, intent(in)    :: ishape(:), type, order, border
-	logical, intent(in)    :: trans
-	real(_), allocatable   :: weights(:,:)
-	real(_) :: v(size(idata,1)), res(size(idata,1))
-	integer :: off(size(pos,2)), inds(size(pos,2))
-	integer :: xi, si, ci, i, j, dind, ndim, nsamp, nw, nsub, ncon, n
-
-	ndim  = size(pos,2)
-	nsamp = size(pos,1)
-	nsub  = size(idata,1)
-	nw    = get_weight_length(type, order)
-	ncon  = nw**ndim
-	if(trans) idata = 0
-	!$omp parallel private(si,weights,off,res,inds,ci,dind,i,xi,v,j,n)
-	allocate(weights(nw,ndim))
-	!$omp do
-	do si = 1, nsamp
-		call calc_weights(type, order, pos(si,:), weights, off)
-		! Multiply each interpolation weight with its corresponding
-		! element in idata. For a 2d case with a non-flattened idata D
-		! in C order, this would be
-		!  D00*W00*W01 D01*W00*W11 D02*W00*W21
-		!  D10*W10*W01 D11*W10*W11 D12*W10*W21
-		!  D20*W20*W01 D21*W20*W11 D22*W20*W21
-		! So loop through each cell of context
-		if(.not. trans) res  = 0
-		inds = 0
-		cloop: do ci = 1, ncon
-			! Get the value of this cell of context, taking into
-			! account boundary conditions
-			dind = 0
-			do i = 1,ndim
-				xi = inds(i) + off(i)
-				n  = ishape(i)
-				if(n < 0) write(*,*) "If I don't have this write here, ifort 15 optimizes away ishape and/or n"
-				xi = map_border(border, ishape(i), xi)
-				! If we don't map onto a valid point (because we use null-boundaries),
-				! this cell doesn't contribute, so go to the next one
-				if(xi < 0) cycle cloop
-				dind = dind * n + xi
-			end do
-			if(.not. trans) then
-				! Standard interpolation
-				v = idata(:,dind+1)
-				! Now multiply this value by all the relevant weights, one
-				! for each dimension
-				do i = 1, ndim
-					v = v * weights(inds(i)+1,i)
-				end do
-				res = res + v
-			else
-				! Transposed interpolation
-				v = odata(:,si)
-				do i = 1, ndim
-					v = v * weights(inds(i)+1,i)
-				end do
-				do j = 1, nsub
-					!$omp atomic
-					idata(j,dind+1) = idata(j,dind+1) + v(j)
-				end do
-			end if
-			! Advance to next cell
-			do i = ndim,1,-1
-				inds(i) = inds(i) + 1
-				if(inds(i) < nw) exit
-				inds(i) = 0
-			end do
-		end do cloop
-		if(.not. trans) odata(:,si) = res
-	end do
-	deallocate(weights)
-	!$omp end parallel
-end subroutine
-
-! If deriv is true, returns the diagonal of the derivative of interpol(idata, pos)
-! with respect to pos. This derivative is a diagonal matrix with respect to
-! pixel becuase the value in one interpolated pixel only depends on the position
-! that pixel reads off, not the positions any other pixels read off. For each
-! element it is a vector, corresponding to the derivative in each direction.
-! So if b_i = interpol(a,pos_i), then
-! (d b_i)_a / d pos_ja = q_ia delta_ij, where q_ia = dinterpol(a,pos_i)_a.
-! odata(nsub,ndim,npos), v(nsub), res(nsub,ndim)
-subroutine interpol_deriv_old(idata, ishape, odata, pos, type, order, border, trans)
-	implicit none
-	real(_), intent(inout) :: idata(:,:), odata(:,:,:)
-	real(_), intent(in)    :: pos(:,:)
-	integer, intent(in)    :: ishape(:), type, order, border
-	logical, intent(in)    :: trans
-	real(_), allocatable   :: weights(:,:), dweights(:,:)
-	real(_) :: v(size(idata,1)), res(size(idata,1),size(pos,2))
-	integer :: off(size(pos,2)), inds(size(pos,2))
-	integer :: xi, si, ci, i, j, dind, ndim, nsamp, nw, nsub, ncon, n
-
-	ndim  = size(pos,2)
-	nsamp = size(pos,1)
-	nsub  = size(idata,1)
-	nw    = get_weight_length(type, order)
-	ncon  = nw**ndim
-	if(trans) idata = 0
-	!$omp parallel private(si,weights,dweights,off,res,inds,ci,dind,i,xi,v,j,n)
-	allocate(weights(nw,ndim),dweights(nw,ndim))
-	!$omp do
-	do si = 1, nsamp
-		call calc_weights(type, order, pos(si,:), weights, off)
-		call calc_weights_deriv(type, order, pos(si,:), dweights, off)
-		! Multiply each interpolation weight with its corresponding
-		! element in idata. For a 2d case with a non-flattened idata D
-		! in C order, this would be
-		!  D00*W00*W01 D01*W00*W11 D02*W00*W21
-		!  D10*W10*W01 D11*W10*W11 D12*W10*W21
-		!  D20*W20*W01 D21*W20*W11 D22*W20*W21
-		! So loop through each cell of context
-		if(.not. trans) res  = 0
-		inds = 0
-		cloop: do ci = 1, ncon
-			! Get the value of this cell of context, taking into
-			! account boundary conditions
-			dind = 0
-			do i = 1,ndim
-				xi = inds(i) + off(i)
-				n  = ishape(i)
-				xi = map_border(border, ishape(i), xi)
-				! If we don't map onto a valid point (because we use null-boundaries),
-				! this cell doesn't contribute, so go to the next one
-				if(xi < 0) cycle cloop
-				dind = dind * n + xi
-			end do
-			if(.not. trans) then
-				! Standard interpolation
-				v = idata(:,dind+1)
-				! Now multiply this value by all the relevant weights, one
-				! for each dimension
-				do i = 1, ndim
-					v = v * weights(inds(i)+1,i)
-				end do
-				! Deriv of v1 v2 v3 ... = (dv1/v1 + dv2/v2 + ...)*v1*v2*v3 ...
-				do i = 1, ndim
-					do j = 1, nsub
-						if(v(j) .ne. 0) res(j,i) = res(j,i) + v(j) * dweights(j,i)/weights(j,i)
-					end do
-				end do
-			else
-				! Transposed interpolation
-				res = odata(:,:,si)
-				do i = 1, ndim
-					res(:,i) = res(:,i) * weights(inds(i)+1,i)
-				end do
-				do i = 1, ndim
-					do j = 1, nsub
-						if(weights(j,i) .ne. 0) then
-							!$omp atomic
-							idata(j,dind+1) = idata(j,dind+1) + res(j,i) * dweights(j,i)/weights(j,i)
-						end if
-					end do
-				end do
-			end if
-			! Advance to next cell
-			do i = ndim,1,-1
-				inds(i) = inds(i) + 1
-				if(inds(i) < nw) exit
-				inds(i) = 0
-			end do
-		end do cloop
-		if(.not. trans) odata(:,:,si) = res
+		if(trans .eq. 0) odata(si,:,:) = res
 	end do
 	deallocate(weights, dweights)
 	!$omp end parallel

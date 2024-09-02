@@ -118,7 +118,7 @@ def resample_fft_simple(d, n, ngroup=100):
 	res *= float(n)/nold
 	return res
 
-def make_equispaced(d, t, quantile=0.1, order=3, mask_nan=False):
+def make_equispaced(d, t, quantile=0.1, mode="spline", order=3, epsilon=None):
 	"""Given an array d[...,nt] of data that has been sampled at times t[nt],
 	return an array that has been resampled to have a constant sampling rate."""
 	# Find the typical sampling rate of the input. We will lose information if
@@ -134,5 +134,5 @@ def make_equispaced(d, t, quantile=0.1, order=3, mask_nan=False):
 	# To interpolate, we need the input sample number as a function of time
 	samples = np.interp(tout, t, np.arange(len(t)))
 	# Now that we have the samples we can finally evaluate the function
-	dout = utils.interpol(d, samples[None], mode="nearest", order=order, mask_nan=mask_nan)
+	dout = utils.interpol(d, samples[None], mode=mode, order=order, border="nearest", epsilon=epsilon)
 	return dout, tout
