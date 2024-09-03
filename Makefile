@@ -1,4 +1,5 @@
 # Standard meson build
+SHELL=/bin/bash
 editable: build
 	(shopt -s nullglob; cd pixell; rm -f *.so; ln -s ../_build/*.so ../_build/*.dylib .)
 test: editable
