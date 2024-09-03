@@ -54,6 +54,7 @@ python_sources = [
 	'pixell/array_ops.py',
 	'pixell/bunch.py',
 	'pixell/cgrid.py',
+	'pixell/cpixell.py',
 	'pixell/colorize.py',
 	'pixell/colors.py',
 	'pixell/coordinates.py',
