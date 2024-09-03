@@ -23,7 +23,7 @@ jobs:
 
       - name: Run Tests (Linux)
         run: |
-          make editable
+          python -m pip install .
           pytest --cov --cov-report html --cov-report xml --cov-report annotate -s
 
       - uses: codecov/codecov-action@v2
@@ -53,7 +53,7 @@ jobs:
 
       - name: Run Tests (MacOS)
         run: |
-          make editable
+          python -m pip install .
           pytest -s
 
   build_wheels:
