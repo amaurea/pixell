@@ -16,13 +16,12 @@ jobs:
       - uses: actions/setup-python@v1
         with:
           python-version: ${{ matrix.python }}
-      
+
       - name: Run Tests (Linux)
         run: |
-          python -m pip install --upgrade pip setuptools wheel meson ninja meson-python cython numpy
-          python -m pip install --no-build-isolation --editable '.[test]'
+          make editable
           pytest --cov --cov-report html --cov-report xml --cov-report annotate -s
-          
+
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
@@ -44,22 +43,9 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Dependencies (MacOS)
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install numpy "Cython<3.0.4"
-          
-
-      - name: Install Package (MacOS)
-        # The built-in fortran compiler does not link to gfortran (just numbered versions)
-        # and build_ext does not play nicely with that. So we link gfortran-X to gfortran.
-        run: |
-          ln -s $FC $(dirname $(which $FC))/gfortran
-          echo "Using FC=$FC CXX=$CXX CC=$CC"
-          python -m pip install .
-
       - name: Run Tests (MacOS)
         run: |
+          make editable
           pytest -s
 
   build_wheels:
@@ -74,16 +60,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.19.1
         env:
           FC: gfortran-12
           CC: gcc-12
           MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+           python -m pip install build
+           python -m build
 
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
+          path: ./dist/*.whl
 
   build_wheels_macos_arm:
     name: Build wheels on ${{ matrix.os }}
@@ -97,17 +85,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.19.1
         env:
           FC: gfortran-12
           CC: gcc-12
           MACOSX_DEPLOYMENT_TARGET: "14.0"
+        run: |
+           python -m pip install build
+           python -m build
 
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
-
+          path: ./dist/*.whl
 
   build_sdist:
     name: Build source distribution
@@ -122,11 +111,6 @@ jobs:
 
       - name: Build sdist
         run: |
-          python -m pip install -U pip
-          python -m pip install -U setuptools
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install "Cython<3.0.4"
-          python -m pip install numpy
           python -m pip install build
           python -m build . --sdist
 
@@ -154,26 +138,3 @@ jobs:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
           # To test: repository_url: https://test.pypi.org/legacy/
-
-
-  # Automatically upload builds to PyPI test when all tests pass.
-  # Requires some thought about versioning before activating.
-  # upload_pypi_test:
-  #   needs: [build_wheels_linux, build_wheels_macos, build_sdist]
-  #   runs-on: ubuntu-latest
-  #   environment:
-  #     name: testpypi
-  #     url: https://test.pypi.org/p/pixell
-    
-  #   # Upload to pypi testing on every successful test run and build generation
-  #   steps:
-  #     - uses: actions/download-artifact@v2
-  #       with:
-  #         name: artifact
-  #         path: dist
-
-  #     - uses: pypa/gh-action-pypi-publish@release/v1
-  #       with:
-  #         repository-url: https://test.pypi.org/legacy/
-  #         user: __token__
-  #         password: ${{ secrets.PYPI_TEST_TOKEN }}

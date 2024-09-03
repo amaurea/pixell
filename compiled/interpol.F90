@@ -1,4 +1,4 @@
-module fortran
+module interpol_@@
 	use iso_c_binding
 	implicit none
 	private :: map_border, calc_weights

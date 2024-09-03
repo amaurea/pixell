@@ -11,8 +11,10 @@ else: default_ext = ".dylib"
 
 def load(name, ext="auto"):
 	"""Load shared library at given file name, supporting relative paths"""
-	if ext == "auto": ext = default_ext
-	return ctypes.CDLL(os.path.join(os.path.dirname(__file__),name + ext))
+	try:
+		if ext == "auto": ext = default_ext
+		return ctypes.CDLL(os.path.join(os.path.dirname(__file__),name + ext))
+	except IOError: raise ImportError("cpixell: Error loading shared library '%s'" % name)
 
 
 def declare(fun, argdesc, retdesc=None):
@@ -284,6 +286,57 @@ def transfer_alm(iainfo, ialm, oainfo, oalm=None, op=lambda a,b:b):
 		for m in range(0, mmax+1):
 			transfer(oa[omstart[m]+m*oainfo.stride:omstart[m]+(lmax+1)*oainfo.stride:oainfo.stride], ia[imstart[m]+m*iainfo.stride:imstart[m]+(lmax+1)*iainfo.stride:iainfo.stride], op)
 	return oalm
+
+# Set up the wcs accelerators
+wcs_types = ["car", "cea"]
+for typ in wcs_types:
+	declare(getattr(cmisc, "wcs_%s_pix2sky" % typ), "i64,d*,d*,d*,d*,d,d,d,d,d,d")
+	declare(getattr(cmisc, "wcs_%s_sky2pix" % typ), "i64,d*,d*,d*,d*,d,d,d,d,d,d")
+declare(cmisc.rewind_inplace, "i64,d*,d,d")
+
+def wcs_pix2sky(wcs, y, x, dec=None, ra=None):
+	# Error out early
+	typ = wcs.wcs.ctype[0].split("-")[-1].lower()
+	if typ not in wcs_types: raise ValueError("Unsupported WCS type %s" % typ)
+	# We don't support dec0 != 0, since that involves a full spherical coordinate
+	# rotation
+	if wcs.wcs.crval[1] != 0: raise ValueError("Unsupported WCS: crval[1] must be 0")
+	y, x = make_contig([y,x],dtype=np.float64)
+	assert y.shape == x.shape
+	if   dec is None: dec = np.zeros_like(y)
+	elif not utils.iscontig(dec) or dec.dtype != np.float64: raise ValueError("dec must be float64 contig")
+	if ra  is None: ra  = np.zeros_like(y)
+	elif not utils.iscontig(ra) or ra.dtype != np.float64: raise ValueError("ra must be float64 contig")
+	fun = getattr(cmisc, "wcs_%s_pix2sky" % typ)
+	fun(y.size, dec.ctypes.data, ra.ctypes.data, y.ctypes.data, x.ctypes.data, wcs.wcs.crval[0], wcs.wcs.crval[1], wcs.wcs.cdelt[0], wcs.wcs.cdelt[1], wcs.wcs.crpix[0], wcs.wcs.crpix[1])
+	return dec, ra
+
+def wcs_sky2pix(wcs, dec, ra, y=None, x=None, safe=False):
+	# Error out early
+	typ = wcs.wcs.ctype[0].split("-")[-1].lower()
+	if typ not in wcs_types: raise ValueError("Unsupported WCS type %s" % typ)
+	# We don't support dec0 != 0, since that involves a full spherical coordinate
+	# rotation
+	if wcs.wcs.crval[1] != 0: raise ValueError("Unsupported WCS: crval[1] must be 0")
+	dec, ra = make_contig([dec,ra],dtype=np.float64)
+	assert dec.shape == ra.shape
+	if y is None: y = np.zeros_like(ra)
+	elif not utils.iscontig(y) or y.dtype != np.float64: raise ValueError("y must be float64 contig")
+	if x  is None: x = np.zeros_like(ra)
+	elif not utils.iscontig(x) or x.dtype != np.float64: raise ValueError("x must be float64 contig")
+	fun = getattr(cmisc, "wcs_%s_sky2pix" % typ)
+	fun(y.size, dec.ctypes.data, ra.ctypes.data, y.ctypes.data, x.ctypes.data, wcs.wcs.crval[0], wcs.wcs.crval[1], wcs.wcs.cdelt[0], wcs.wcs.cdelt[1], wcs.wcs.crpix[0], wcs.wcs.crpix[1])
+	if safe:
+		period = np.abs(360/wcs.wcs.cdelt[1])
+		rewind(x, ref=period/2, period=period, inplace=True)
+	return y, x
+
+def rewind(arr, ref=0, period=1, inplace=False):
+	if inplace and (not isinstance(arr, np.ndarray) or not utils.iscontig(arr) or arr.dtype != np.float64):
+		raise ValueError("Arr must be float64 contig for inplace operation")
+	else: arr = np.array(arr, dtype=np.float64)
+	cmisc.rewind_inplace(arr.size, arr.ctypes.data, ref, period)
+	return arr
 
 ############
 # srcsim.c #

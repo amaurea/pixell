@@ -1,4 +1,4 @@
-module array_ops
+module array_ops_64
 	use iso_c_binding
 	implicit none
 

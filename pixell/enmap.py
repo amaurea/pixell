@@ -1,6 +1,8 @@
 from __future__ import print_function
 import numpy as np, scipy.ndimage, warnings, astropy.io.fits, sys, time, os, contextlib
 from . import utils, wcsutils, powspec, fft as enfft
+try: from . import cpixell
+except ImportError: cpixell = None
 
 # Things that could be improved:
 #  1. We assume exactly 2 WCS axes in spherical projection in {dec,ra} order.
@@ -475,6 +477,10 @@ def pixmap(shape, wcs=None):
 def pix2sky(shape, wcs, pix, safe=True, corner=False, bcheck=False):
 	"""Given an array of pixel coordinates [{y,x},...],
 	return sky coordinates in the same ordering."""
+	# Try to forward to fast version if possible
+	if False and cpixell and not bcheck and not corner and not safe:
+		try: return np.array([cpixell.wcs_pix2sky(wcs, pix[0], pix[1])])
+		except ValueError: pass
 	pix = np.asarray(pix).astype(float)
 	if corner: pix -= 0.5
 	pflat = pix.reshape(pix.shape[0], -1)
@@ -492,6 +498,10 @@ def sky2pix(shape, wcs, coords, safe=True, corner=False, bcheck=False):
 	or pixel centers. This represents a shift of half a pixel.
 	If corner is False, then the integer pixel closest to a position
 	is round(sky2pix(...)). Otherwise, it is floor(sky2pix(...))."""
+	# Try to forward to fast version if possible
+	if False and cpixell and not bcheck and not corner and safe <= 1:
+		try: return np.array([cpixell.wcs_sky2pix(wcs, coords[0], coords[1], safe=safe)])
+		except ValueError: pass
 	coords = np.asarray(coords)/get_unit(wcs)
 	cflat  = coords.reshape(coords.shape[0], -1)
 	# Quantities with a w prefix are in wcs ordering (ra,dec)
