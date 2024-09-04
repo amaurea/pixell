@@ -25,7 +25,7 @@ fortran_sources = {
 }
 
 foreach srcs, name : fortran_sources
-	shared_library(name, srcs, dependencies: [omp_dep],
+	shared_module(name, srcs, dependencies: [omp_dep],
 		install: true, install_dir: odir, name_prefix: '')
 endforeach
 
@@ -36,7 +36,7 @@ c_sources = {
 }
 
 foreach srcs, name : c_sources
-	shared_library(name, srcs, dependencies: [omp_dep, c_m_dep],
+	shared_module(name, srcs, dependencies: [omp_dep, c_m_dep],
 		install: true, install_dir: odir, name_prefix: '')
 endforeach
 
