@@ -1,21 +1,27 @@
 # This module implements a ctypes interface to the pixell C functions. This is
 # a test to see if this is more convenient than cython or pure C extensions
-import numpy as np, ctypes, os, platform
+import numpy as np, ctypes, os, sys
 from . import bunch, utils
 
-# Should probably split this into a ctypes_utils.py and individual files
-# with the same interface as before, e.g. array_ops.py, interpol.py, etc.
+def find_lib(name):
+	ref = [os.path.dirname(os.path.abspath(__file__))]
+	# Try relative import first. This should be the right
+	# way to do things, but fails for the horrible clunky
+	# hack that is setuptools editable installs, which relies
+	# on installing a .pth file setting up an import loader
+	# hook that has the module name hardcoded. We therefore
+	# try again with an absolute import afterwards.
+	for prefix in ["", "pixell"]:
+		for finder in sys.meta_path:
+			spec = finder.find_spec(prefix + "."+name, ref)
+			if spec: return spec.origin
 
-if platform.uname()[0] == "Linux": default_ext = ".so"
-else: default_ext = ".dylib"
-
-def load(name, ext="auto"):
-	"""Load shared library at given file name, supporting relative paths"""
+def load(name):
 	try:
-		if ext == "auto": ext = default_ext
-		return ctypes.CDLL(os.path.join(os.path.dirname(__file__),name + ext))
+		path = find_lib(name)
+		if not path: raise IOError
+		return ctypes.CDLL(path)
 	except IOError: raise ImportError("cpixell: Error loading shared library '%s'" % name)
-
 
 def declare(fun, argdesc, retdesc=None):
 	fun.argtypes = parse_argdesc(argdesc)

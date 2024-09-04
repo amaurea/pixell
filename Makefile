@@ -1,14 +1,21 @@
 # Standard meson build
 SHELL=/bin/bash
-editable: build
-	(shopt -s nullglob; cd pixell; rm -f *.so; ln -s ../_build/*.so ../_build/*.dylib .)
-test: editable
-	pytest
-build: _build
-	(cd _build; meson compile)
+# Editable install. May break in an externally managed environment.
+# If you have trouble with this, consider the inline build below
+editable:
+	python -m pip install --no-build-isolation --editable .
 # do DESTDIR=... make install to override where things are installed
 install: build
 	(cd _build; meson install)
+test: inline
+	pytest
+build: _build
+	(cd _build; meson compile)
+# Inline build. Does not actually install anything, but you can
+# get an editable build by creating a symlink to pixell/pixell
+# somewhere in pythonpath
+inline: build
+	(shopt -s nullglob; cd pixell; rm -f *.so; ln -s ../_build/*.so ../_build/*.dylib .)
 # Manual build. Does not use meson. Controlled by compiled/Makefile.
 # Not general, but easy to debug and adapt to own system
 manual: unlink
