@@ -3,18 +3,18 @@
 import numpy as np, ctypes, os, sys
 from . import bunch, utils
 
-def find_lib(name):
-	ref = [os.path.dirname(os.path.abspath(__file__))]
-	# Try relative import first. This should be the right
-	# way to do things, but fails for the horrible clunky
-	# hack that is setuptools editable installs, which relies
-	# on installing a .pth file setting up an import loader
-	# hook that has the module name hardcoded. We therefore
-	# try again with an absolute import afterwards.
-	for prefix in ["", "pixell"]:
-		for finder in sys.meta_path:
-			spec = finder.find_spec(prefix + "."+name, ref)
-			if spec: return spec.origin
+# This one works, but is incompatible with pip editable installs
+if platform.uname()[0] == "Linux": default_ext = ".so"
+else: default_ext = ".dylib"
+def find_lib(name): return os.path.join(os.path.dirname(__file__),name) + default_ext
+
+## This one is more general, but fails on macs
+#def find_lib(name):
+#	ref = [os.path.dirname(os.path.abspath(__file__))]
+#	for prefix in ["", "pixell"]:
+#		for finder in sys.meta_path:
+#			spec = finder.find_spec(prefix + "."+name, ref)
+#			if spec: return spec.origin
 
 def load(name):
 	try:
