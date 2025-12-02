@@ -3047,6 +3047,8 @@ def slice_downgrade(d, s, axis=-1):
 def unflatten_slice(sel, shape):
 	"""If flatmap = map.reshape(-1), then this function
 	finds an unflattened slice usel such that flatmap[sel] = map[usel]."""
+	# Handle 0d case, which breaks below due to a numpy 0d limitation
+	if len(shape) == 0: return ()
 	# This is simple but inefficient. Don't use for big slices
 	mgsel    = tuple([slice(0,n) for n in shape])
 	all_inds = np.mgrid[mgsel].reshape(len(shape),-1)
