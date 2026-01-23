@@ -3053,12 +3053,7 @@ def write_hdf(fname, emap, address=None, extra={}):
 
 def read_hdf(fname, sel=None, box=None, pixbox=None, geometry=None, wrap="auto", mode=None, sel_threshold=10e6, wcs=None, delayed=False, address=None, recenter=False, preflat=False):
 	"""Read an enmap from the specified hdf file. Two formats
-	are supported. The old enmap format, which simply used
-	a bounding box to specify the coordinates, and the new
-	format, which uses WCS properties. The latter is used if
-	available. With the old format, plate carree projection
-	is assumed. Note: some of the old files have a slightly
-	buggy wcs, which can result in 1-pixel errors.
+	are supported.
 
 	If address is a string, the map will be loaded from that group
 	address within fname.
@@ -3074,13 +3069,19 @@ def read_hdf(fname, sel=None, box=None, pixbox=None, geometry=None, wrap="auto",
 	with context as hfile:
 		if address is not None:
 			hfile = hfile[address]
-		data = hfile["data"][()]
-		hwcs = hfile["wcs"]
-		header = astropy.io.fits.Header()
-		for key in hwcs:
-			header[key] = fix_python3(hwcs[key][()])
-		if wcs is None:
-			wcs = wcsutils.WCS(header).sub(2)
+		if isinstance(hfile, h5py.Dataset):
+			data = hfile[()]
+			wcs_ = wcsutils.explicit(crval=[1,1], cdelt=[1,1])
+		else:
+			data = hfile["data"][()]
+			try:
+				hwcs = hfile["wcs"]
+				header = astropy.io.fits.Header()
+				for key in hwcs:
+					header[key] = fix_python3(hwcs[key][()])
+				wcs_ = wcsutils.WCS(header).sub(2)
+			except KeyError: wcs_ = wcsutils.explicit(crval=[1,1], cdelt=[1,1])
+		if wcs is None: wcs = wcs_
 		proxy = ndmap_proxy_hdf(data, wcs, fname=fname, threshold=sel_threshold, preflat=preflat)
 		return read_helper(proxy, sel=sel, box=box, pixbox=pixbox, geometry=geometry, wrap=wrap, mode=mode, delayed=delayed, recenter=recenter)
 

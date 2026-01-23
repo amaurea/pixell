@@ -881,6 +881,11 @@ def symlink(src, dest):
 	except FileNotFoundError: pass
 	os.symlink(os.path.relpath(src, os.path.dirname(dest)), dest)
 
+def rm(fname):
+	"""Remove file if it exists. Do nothing otherwise"""
+	try: os.remove(fname)
+	except FileNotFoundError: pass
+
 def decomp_basis(basis, vec):
 	return np.linalg.solve(basis.dot(basis.T),basis.dot(vec.T)).T
 
@@ -1502,7 +1507,7 @@ def allgather(a, comm):
 	rather than needing an output argument."""
 	a   = np.asarray(a)
 	res = np.zeros((comm.size,)+a.shape,dtype=a.dtype)
-	if np.issubdtype(a.dtype, np.bytes_):
+	if np.issubdtype(a.dtype, np.bytes_) or np.issubdtype(a.dtype, str):
 		comm.Allgather(a.view(dtype=np.uint8), res.view(dtype=np.uint8))
 	else:
 		comm.Allgather(a, res)
@@ -2381,7 +2386,7 @@ def block_expand(a, bsize, osize, axis=-1, off=0, op="nearest", inclusive=True):
 	axis  %= a.ndim
 	if op == "nearest":
 		if inclusive:
-			pre, mid, tail = np.split(a, [off>0,(off>0)+nwhole], axis)
+			pre, mid, tail = np.split(a, [int(off>0),int(off>0)+nwhole], axis)
 			parts = []
 			if pre.size > 0: parts.append(np.repeat(pre, off,   axis))
 			if mid.size > 0: parts.append(np.repeat(mid, bsize, axis))
