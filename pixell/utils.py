@@ -49,6 +49,9 @@ R_uranus  =25559e3    ; M_uranus  = 86.8e24     ; r_uranus  =2872.5e9
 R_neptune =24764e3    ; M_neptune = 102e24      ; r_neptune =4495.1e9
 R_pluto   = 1185e3    ; M_pluto   = 0.0146e24   ; r_pluto   =5906.4e9
 
+r_l1 = R_earth - 1.4916e9
+r_L2 = R_earth + 1.5016e9
+
 # These are like degree, arcmin and arcsec, but turn any lists
 # they touch into arrays.
 a    = np.array(1.0)
@@ -638,7 +641,8 @@ def interpol(arr, inds, out=None, mode="spline", border="nearest",
 	"""
 	arr  = np.asanyarray(arr)
 	inds = np.asanyarray(inds)
-	npre = arr.ndim - len(inds)
+	ndim = 1 if inds.ndim == 0 else len(inds)
+	npre = arr.ndim - ndim
 	if ip is None:
 		ip = interpolator(arr, npre, mode=mode, border=border, order=order,
 				cval=cval, epsilon=epsilon)
@@ -668,16 +672,20 @@ class SplineInterpolator:
 		self.border = border
 		if self.mode != "spline": raise ValueError("Unrecognized spline interpolation mode '%s'" % str(mode))
 		arr = np.asanyarray(arr)
+		# Need floating-point array (so not an integer array) to do interpolation aside from nearest
+		# neighbor. If we don't do this, then the function will silently return the wrong result
+		if order != 0:
+			arr = asfarray(arr)
 		if self.order > 1:
 			arr = arr.copy()
 			for I in nditer(arr.shape[:npre]):
 				arr[I] = scipy.ndimage.spline_filter(arr[I], order=self.order, mode=self.border)
 		self.arr = arr
 	def __call__(self, inds, out=None):
-		inds, out = _ip_prepare(self, inds, out=out)
+		inds, out, wsel = _ip_prepare(self, inds, out=out)
 		# Do the actual interpolation
 		for I in nditer(self.arr.shape[:self.npre]):
-			out[I] = scipy.ndimage.map_coordinates(self.arr[I], inds, order=self.order,
+			out[wsel][I] = scipy.ndimage.map_coordinates(self.arr[I], inds[wsel], order=self.order,
 				mode=self.border, cval=self.cval, prefilter=False)
 		return out
 
@@ -708,14 +716,14 @@ class FourierInterpolator:
 			raise ValueError("Invalid value of precompute: '%s'. Valid values are plan, fft or none" % str(precompute))
 	def __call__(self, inds, out=None):
 		from . import fft
-		inds, out = _ip_prepare(self, inds, out=out)
+		inds, out, wsel = _ip_prepare(self, inds, out=out)
 		if self.precompute == "plan":
 			out = self.plan.eval(inds, out=out)
 		elif self.precompute == "fft":
-			out = fft.interpol_nufft(self.farr, inds, out=out, nofft=True,
+			out = fft.interpol_nufft(self.farr, inds[wsel], out=out[wsel], nofft=True,
 				epsilon=self.epsilon, complex=self.complex)
 		else:
-			out = fft.interpol_nufft(self.arr, inds, out=out,
+			out = fft.interpol_nufft(self.arr, inds[wsel], out=out[wsel],
 				epsilon=self.epsilon, complex=self.complex)
 		return out
 
@@ -730,17 +738,19 @@ def _ip_get_mode(mode, order):
 
 def _ip_prepare(self, inds, out=None):
 		inds = np.asanyarray(inds)
-		ndim = inds.ndim
-		if self.arr.ndim-len(inds) != self.npre:
+		ndim = 1 if inds.ndim == 0 else len(inds)
+		if self.arr.ndim-ndim != self.npre:
 			raise ValueError("arr.ndim-len(inds) != npre")
-		# Allow us to use ndim<2 inputs, e.g. interpol(np.arange(6),3) instead of
-		# interpol(np.arange(6),[[3]])
-		while inds.ndim < 2: inds = inds[...,None]
+		# Part 1 of supporting ndim<2 inputs, so we can do e.g.
+		# interpol(np.arange(6),3) instead of interpol(np.arange(6),[[3]])
+		while inds.ndim < 1: inds = inds[...,None]
 		if out is None:
 			# Doing it this way lets interpol inherit the array subclass from inds, which
 			# is useful when interpolating one enmap with another enmap
 			out = np.zeros_like(inds, shape=self.arr.shape[:self.npre]+inds.shape[1:], dtype=self.arr.dtype)
-		return inds, out
+		# Part 2 of supporting ndim<2 inputs
+		wsel = (Ellipsis,None) if inds.ndim < 2 else Ellipsis
+		return inds, out, wsel
 
 def interp(x, xp, fp, left=None, right=None, period=None):
 	"""Unlike utils.interpol, this is a simple wrapper around np.interp that extends it
@@ -2100,6 +2110,8 @@ def find_equal_groups_fast(vals):
 	1. Only works on 1d arrays
 	2. Only works with exact quality, with no support for approximate equality
 	3. Returns 3 numpy arrays instead of a list of lists.
+
+	Groups will be returned in ascending order of val.
 	"""
 	order = np.argsort(vals, kind="stable")
 	uvals, edges = np.unique(vals[order], return_index=True)
@@ -2138,7 +2150,11 @@ def label_multi(valss, return_index=False):
 	length n but potentially different data types, return a single 1d array
 	labels[n] of integers such that unique lables correspond to unique valss[:].
 	More precisely, valss[:][labels[i]] == valss[:][labels[j]] only if
-	labels[i] == labels[j]. The purpose of this is to go from having a heterogenous
+	labels[i] == labels[j]. The integers are assigned in ascending order starting
+	from 0, so if e.g. there are 3 unique combinations in vals, labels will consist
+	of values from the set 0, 1 and 2.
+
+	The purpose of this function is to go from having a heterogenous
 	label like (1, "foo", 1.24) to having a single integer as the label.
 
 	Example: label_multi([[0,0,1,1,2],["a","b","b","b","b"]]) → [0,1,2,2,3]"""
@@ -2318,6 +2334,15 @@ def downgrade(arr, down, axes=None, op=np.mean, inclusive=True):
 	axes = astuple(axes)
 	for ax, dn in zip(axes, down):
 		arr = block_reduce(arr, dn, axis=ax, op=op, inclusive=inclusive)
+	return arr
+
+def upgrade(arr, factor, axes=None, oshape=None, inclusive=True):
+	factor = astuple(factor)
+	if axes is None: axes = list(range(-len(factor),0))
+	axes = astuple(axes)
+	for ax, up in zip(axes, factor):
+		n = oshape[ax] if oshape is not None else arr.shape[ax]*up
+		arr = block_expand(arr, up, n, axis=ax, inclusive=inclusive)
 	return arr
 
 def block_reduce(a, bsize, axis=-1, off=0, op=np.mean, inclusive=True):

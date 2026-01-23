@@ -85,32 +85,39 @@ def hor2equ(coords, ctime, site=None, weather=None):
 	weather = sites.expand_weather(weather, site)
 	qp = qpoint.QPoint(accuracy="high", fast_math=True, mean_aber=True,
 		rate_ref="always", **weather)
-	# seems like azelpsi2bore does something else
+	# Get the shape here and not after ascontiguousarray because that
+	# function will turn a 0d array into a 1d one
+	shape = coords.az.shape
 	# broadcast_arrays and set writeable to false just to quiet a
-	# numpy false positive warning in qpoint
+	# numpy false positive warning in qpoint.
 	az, el, ctime, psi = [np.ascontiguousarray(arr) for arr in
 		np.broadcast_arrays(coords.az/DEG, coords.el/DEG, ctime, coords.psi)]
 	for arr in [az, el, ctime, psi]:
 		arr.flags["WRITEABLE"] = False
-	shape = az.shape
+	# seems like azelpsi2bore does something else
 	q  = qp.azel2bore(az.reshape(-1), el.reshape(-1), None, None, lon=site.lon, lat=site.lat, ctime=ctime.reshape(-1))
 	# to proper quat and recover correct shape
-	q  = quaternion.as_quat_array(q).reshape(shape)
+	q  = quaternion.as_quat_array(q)
 	q *= euler(2, psi+np.pi)
+	q  = q.reshape(shape)
 	return Coords(q=q)
 
 def equ2hor(coords, ctime, site=None, weather=None):
+	"""FIXME: This function is only approximately the inverse of hor2equ.
+	The round-trip error is around 0.025 degree in el and 10 degrees in psi."""
 	if site is None: site = sites.default_site
 	site    = sites.expand_site(site)
 	weather = sites.expand_weather(weather, site)
 	qp = qpoint.QPoint(accuracy="high", fast_math=True, mean_aber=True,
 		rate_ref="always", **weather)
+	# Get the shape here and not after ascontiguousarray because that
+	# function will turn a 0d array into a 1d one
+	shape = coords.ra.shape
 	# I don't recover the original roll exactly here. It's off by about half a degree
 	ra, dec, ctime, psi = [np.ascontiguousarray(arr) for arr in
 		np.broadcast_arrays(coords.ra/DEG, coords.dec/DEG, ctime, coords.psi)]
 	for arr in [ra, dec, ctime, psi]:
 		arr.flags["WRITEABLE"] = False
-	shape = ra.shape
 	az, el, pa = qp.radec2azel(ra.reshape(-1), dec.reshape(-1), psi.reshape(-1), lon=site.lon, lat=site.lat, ctime=ctime.reshape(-1))
 	# Recover correct shape
 	az, el, pa = [a.reshape(shape) for a in [az, el, pa]]
@@ -259,6 +266,15 @@ def rotation_xieta(xi, eta, gamma=0):
 	lat = np.arccos((xi**2+eta**2)**0.5)
 	psi = gamma-lon
 	return rotation_lonlat(lon, lat, psi)
+
+def decompose_xieta(q):
+	lon, lat, psi = decompose_lonlat(q)
+	gamma = psi+lon
+	# sin(lon) = -xi/r, cos(lon) = -eta/r, r = (xi**2+eta**2)**0.5
+	r     = np.cos(lat)
+	xi    = -np.sin(lon)*r
+	eta   = -np.cos(lon)*r
+	return xi, eta, gamma
 
 def expand_sys(sys, ctime=None, site=None, weather=None):
 	# Parse if necessary
