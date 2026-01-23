@@ -90,6 +90,13 @@ def hor2equ(coords, ctime, site=None, weather=None):
 	# numpy false positive warning in qpoint
 	az, el, ctime, psi = [np.ascontiguousarray(arr) for arr in
 		np.broadcast_arrays(coords.az/DEG, coords.el/DEG, ctime, coords.psi)]
+	# If empty, just return input unchanged
+	if el.size == 0: return coords
+	# qpoint is buggy for el > 90 deg. Expensive to test all inputs, but they are
+	# usually either all above or below the limit, so we can perform a cheap test of
+	# just the first element
+	if not el_in_range(el.reshape(-1)[0]*DEG):
+		raise ValueError("qpoint does not handle el>pi/2 correctly. To normalize the coordinates, you can do (az,el,psi)→(az+pi,pi-el,psi+pi) where pi/2<el<pi")
 	for arr in [az, el, ctime, psi]:
 		arr.flags["WRITEABLE"] = False
 	shape = az.shape
@@ -108,6 +115,7 @@ def equ2hor(coords, ctime, site=None, weather=None):
 	# I don't recover the original roll exactly here. It's off by about half a degree
 	ra, dec, ctime, psi = [np.ascontiguousarray(arr) for arr in
 		np.broadcast_arrays(coords.ra/DEG, coords.dec/DEG, ctime, coords.psi)]
+	if ra.size == 0: return coords
 	for arr in [ra, dec, ctime, psi]:
 		arr.flags["WRITEABLE"] = False
 	shape = ra.shape
@@ -365,3 +373,5 @@ def asfarray(arr, default_dtype=np.float64):
 		return arr
 	else:
 		return arr.astype(default_dtype)
+
+def el_in_range(el): return el >= -np.pi/2 and el <= np.pi/2

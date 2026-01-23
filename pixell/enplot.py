@@ -269,6 +269,7 @@ def define_arg_parser(nodefault=False):
 	add_argument("--slice", type=str, help="Apply this numpy slice to the map before plotting.")
 	add_argument("--sub",   type=str, help="Slice a map based on dec1:dec2,ra1:ra2.")
 	add_argument("-H", "--hdu",  type=int, default=0, help="Header unit of the fits file to use")
+	add_argument("--address", type=str, default=None, help="Which hdf group or dataset to use, if reading from hdf")
 	add_argument("--op", type=str, help="Apply this general operation to the map before plotting. For example, 'log(abs(m))' would give you a lograithmic plot.")
 	add_argument("--op2", type=str, help="Like op, but allows multiple statements")
 	add_argument("-d", "--downgrade", type=str, default="1", help="Downsacale the map by this factor before plotting. This is done by averaging nearby pixels. See --upgrade for syntax.")
@@ -382,7 +383,7 @@ def get_map(ifile, args, return_info=False, name=None):
 		if isinstance(ifile, basestring):
 			toks  = ifile.split(":")
 			ifile, slice = toks[0], ":".join(toks[1:])
-			m0    = enmap.read_map(ifile, hdu=args.hdu, delayed=True)
+			m0    = enmap.read_map(ifile, hdu=args.hdu, address=args.address, delayed=True)
 			if name is None: name = ifile
 		else:
 			m0    = ifile
