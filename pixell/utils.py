@@ -3922,3 +3922,7 @@ def infer_bin_edges(centers, ref=1):
 	rhs   = np.concatenate([centers,[centers[ref+1]-centers[ref]]])
 	edges = sparse.linalg.spsolve(P.T.dot(P), P.T.dot(rhs))
 	return edges
+
+# frequency interval is 1/nsamp/dt = 1/dur
+def freq2ind(freq, dur): return freq*dur
+def ind2freq(ind, dur): return ind/dur
