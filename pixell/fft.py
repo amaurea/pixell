@@ -768,3 +768,17 @@ def _nufft_helper(u, nu, inds, axes=None, periodicity=None, epsilon=None,
 		periodicity=periodicity, pshape=pshape, tshape=tshape, npoint=npoint,
 		other_axes=other_axes, axall=axall, complex=complex, rtype=rtype,
 		ctype=ctype, npre=npre, uiter=uiter, nuiter=nuiter)
+
+# Delay measurement via autocorrelation
+#  b(x)  = a(x+Δ)
+#  fb    = fa * exp(-2j pi f Δ)
+#  fa'fb = ps * exp(-2j pi f Δ)
+# This is the convolution of a's autocorrelation function
+# and an offset delta function, with the offset being
+# what we want to measure. a's autocorrelation function
+# should peak at 0, so the convolution should peak at Δ.
+def measure_shift(a,b, axis=-1):
+	n = a.shape[axis]
+	c = ifft(np.conj(fft(a+0j, axes=axis))*fft(b+0j,axes=axis), axes=axis).real
+	Δ = (np.argmax(c, axis)+n//2)%n-n//2
+	return Δ

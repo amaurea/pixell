@@ -130,10 +130,16 @@ def find_range(ranges, vals, sorted=False, default=-1):
 	and a set of values vals[n], returns the index of the range
 	each value falls inside, or -1 for values not inside a range.
 	Pass sorted=True if ranges is already sorted, to save some time."""
-	if not sorted: ranges = ranges[np.argsort(ranges[:,0])]
+	if not sorted:
+		order  = np.argsort(ranges[:,0])
+		ranges = ranges[order]
 	inds = np.searchsorted(ranges[:,0], vals, side="right")-1
 	good = (ranges[inds,0]<=vals)&(ranges[inds,1]>vals)
 	inds[~good] = default
+	if not sorted:
+		# inds[good] are now indices into the sorted ranges,
+		# but we want indices into the original ranges
+		inds[good] = order[inds[good]]
 	return inds
 
 def find_first(mask, axis=-1, default=-1):
