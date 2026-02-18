@@ -421,7 +421,6 @@ def get_map(ifile, args, return_info=False, name=None):
 				except AttributeError: m = eval("m[:]"+args.slice) # handle proxy case
 			# Unwrap any remaining proxy
 			m    = m[:]
-			flip = (m.wcs.wcs.cdelt*m0.wcs.wcs.cdelt)[::-1]<0
 			assert m.ndim >= 2, "Image must have at least 2 dimensions"
 			# Apply arbitrary map operations
 			m1 = m
@@ -436,14 +435,11 @@ def get_map(ifile, args, return_info=False, name=None):
 			scale = parse_list(args.upgrade, int)
 			if np.any(np.array(scale)>1):
 				m = enmap.upgrade(m, scale)
-			# Flip such that pixels are in PIL or matplotlib convention,
-			# such that RA increases towards the left and dec upwards in
-			# the final image. Unless a slicing operation on the image
-			# overrrode this.
-			if m.wcs.wcs.cdelt[1] > 0: m = m[...,::-1,:]
-			if m.wcs.wcs.cdelt[0] > 0: m = m[...,:,::-1]
-			if flip[0]: m = m[...,::-1,:]
-			if flip[1]: m = m[...,:,::-1]
+			# Used to force RA increasing to the left and dec increasing
+			# upwards here, but better to just display the files as they
+			# are, and just always flipping y to account for FITS vs. PIL
+			# convention differences
+			m = m[...,::-1,:]
 			# Update stamp list
 			mlist[i] = m
 		wcslist = [m.wcs for m in mlist]
