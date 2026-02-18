@@ -2067,6 +2067,17 @@ def split_outside(a, sep, start="([{", end=")]}"):
 			res += toks[1:]
 	return res
 
+def replace_outside(pattern, repl, string, start="([{", end=")]}"):
+	toks = split_by_group(string, start=start, end=end)
+	otoks= []
+	for tok in toks:
+		if   len(tok) == 0: continue
+		elif tok[0] not in start:
+			# Ok, we're in a segment where we should do a substitution
+			tok = re.subn(pattern, repl, tok)[0]
+		otoks.append(tok)
+	return "".join(otoks)
+
 def find_equal_groups(a, tol=0):
 	"""Given a[nsamp,...], return groups[ngroup][{ind,ind,ind,...}]
 	of indices into a for which all the values in the second index
