@@ -8,7 +8,10 @@ class SQL:
 	def __init__(self, fname=":memory:"):
 		# Is it a file name?
 		if isinstance(fname, str):
-			self.conn = sqlite3.connect(fname)
+			try: self.conn = sqlite3.connect(fname)
+			except sqlite3.OperationalError as e:
+				# Make sqlite3 exception more informative
+				raise sqlite3.OperationalError(str(e) + " " + fname)
 			self.fname= fname
 			self.own  = True
 		# Is it an SQL or similar?
