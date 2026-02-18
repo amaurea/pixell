@@ -127,8 +127,9 @@ def kappa_to_phi(kappa_alm,kappa_ainfo=None):
 	    phi_alm: The filtered alms kappa_alm / ( l * (l+1) / 2 )
 	"""
 	from . import curvedsky
-	oalm = curvedsky.almxfl(alm=kappa_alm,lfilter=lambda x: 1./(x*(x+1)/2) ,ainfo=kappa_ainfo)
-	oalm[~np.isfinite(oalm)] = 0
+	with utils.nowarn():
+		oalm = curvedsky.almxfl(alm=kappa_alm,lfilter=lambda x: 1./(x*(x+1)/2) ,ainfo=kappa_ainfo)
+	utils.remove_nan(oalm)
 	return oalm
 
 def _fix_lenspyx_result(lenspyx_result, lenspyx_geom_info, shape, wcs):
