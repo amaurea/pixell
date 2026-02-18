@@ -314,7 +314,7 @@ def alm2map_healpix(alm, healmap=None, spin=[0,2], deriv=False, adjoint=False,
 	"""Projects the given alm[...,ncomp,nalm] onto the given healpix map
 	healmap[...,ncomp,npix]."""
 	dtype      = utils.native_dtype(utils.real_dtype(alm.dtype))
-	alm, ainfo = prepare_alm(alm, ainfo, dtype=dtype)
+	alm, ainfo = prepare_alm(alm, ainfo, dtype=dtype, convert=not adjoint)
 	healmap    = prepare_healmap(healmap, nside, alm.shape[:-1], dtype)
 	alm_full   = utils.atleast_Nd(alm, 2 if deriv else 3)
 	map_full   = utils.atleast_Nd(healmap, 3)
@@ -353,7 +353,7 @@ def map2alm_healpix(healmap, alm=None, ainfo=None, lmax=None, spin=[0,2], weight
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=healmap.shape[:-1], dtype=utils.native_dtype(healmap.dtype))
+	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=healmap.shape[:-1], dtype=utils.native_dtype(healmap.dtype), convert=adjoint)
 	alm_full   = utils.atleast_Nd(alm, 2 if deriv else 3)
 	map_full   = utils.atleast_Nd(healmap, 3)
 	alm_full   = utils.fix_zero_strides(alm_full)
@@ -730,7 +730,7 @@ def alm2map_2d(alm, map, ainfo=None, minfo=None, spin=[0,2], deriv=False, copy=F
 	if copy:
 		if adjoint and alm is not None: alm = alm.copy()
 		else:       map = map.copy()
-	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=not adjoint)
 	minfo = analyse_geometry(map.shape, map.wcs, tol=pix_tol)
 	# Loop over pre-pre-dimensions. ducc usually doesn't do anything clever with
 	# these, so looping in python is cheap
@@ -750,7 +750,7 @@ def alm2map_cyl(alm, map, ainfo=None, minfo=None, spin=[0,2], deriv=False, copy=
 	if copy:
 		if adjoint and alm is not None: alm = alm.copy()
 		else:       map = map.copy()
-	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=not adjoint)
 	if minfo is None: minfo = analyse_geometry(map.shape, map.wcs, tol=pix_tol)
 	# Loop over pre-pre-dimensions. ducc usually doesn't do anything clever with
 	# these, so looping in python is cheap
@@ -770,7 +770,7 @@ def alm2map_general(alm, map, ainfo=None, spin=[0,2], deriv=False, copy=False, v
 	if copy:
 		if adjoint and alm is not None: alm = alm.copy()
 		else:       map = map.copy()
-	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	if adjoint: alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=not adjoint)
 	if locinfo is None: locinfo = calc_locinfo(map.shape, map.wcs)
 	# Loop over pre-pre-dimensions. ducc usually doesn't do anything clever with
 	# these, so looping in python is cheap
@@ -797,7 +797,7 @@ def map2alm_2d(map, alm=None, ainfo=None, minfo=None, lmax=None, spin=[0,2], der
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=adjoint)
 	minfo = analyse_geometry(map.shape, map.wcs, tol=pix_tol)
 	# Loop over pre-pre-dimensions. ducc usually doesn't do anything clever with
 	# these, so looping in python is cheap
@@ -818,7 +818,7 @@ def map2alm_cyl(map, alm=None, ainfo=None, minfo=None, lmax=None, spin=[0,2], we
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=adjoint)
 	minfo = analyse_geometry(map.shape, map.wcs, tol=pix_tol)
 	# Get our weights, approximate or not
 	if weights is None:
@@ -850,7 +850,7 @@ def map2alm_general(map, alm=None, ainfo=None, minfo=None, lmax=None, spin=[0,2]
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype))
+	alm, ainfo = prepare_alm(alm=alm, ainfo=ainfo, lmax=lmax, pre=map.shape[:-2], dtype=utils.native_dtype(map.dtype), convert=adjoint)
 	if locinfo is None: locinfo = calc_locinfo(map.shape, map.wcs)
 	if weights is None: weights = map.pixsizemap()[locinfo.mask].astype(map.dtype, copy=False)
 	for I in utils.nditer(map.shape[:-3]):
@@ -874,7 +874,7 @@ def alm2map_raw_2d(alm, map, ainfo=None, spin=[0,2], deriv=False, copy=False, ve
 	if copy:
 		if adjoint: alm = alm.copy()
 		else:       map = map.copy()
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread, convert_alm=not adjoint)
 	minfo = analyse_geometry(map.shape, map.wcs)
 	if adjoint: func = ducc0.sht.experimental.adjoint_synthesis_2d
 	else:       func = ducc0.sht.experimental.synthesis_2d
@@ -902,7 +902,7 @@ def alm2map_raw_cyl(alm, map, ainfo=None, minfo=None, spin=[0,2], deriv=False, c
 	if copy:
 		if adjoint: alm = alm.copy()
 		else:       map = map.copy()
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread, convert_alm=not adjoint)
 	map_full = utils.postflat(map_full, 2) # ducc wants just 1 pixel axis
 	rinfo    = get_ring_info(map.shape, map.wcs)
 	if adjoint: func = ducc0.sht.experimental.adjoint_synthesis
@@ -967,7 +967,7 @@ def alm2map_raw_general(alm, map, loc, ainfo=None, spin=[0,2], deriv=False, copy
 	if copy:
 		if adjoint: alm = alm.copy()
 		else:       map = map.copy()
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread, pixdims=1)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, deriv=deriv, nthread=nthread, pixdims=1, convert_alm=not adjoint)
 	if adjoint: func = ducc0.sht.experimental.adjoint_synthesis_general
 	else:       func = ducc0.sht.experimental.synthesis_general
 	if epsilon is None:
@@ -993,7 +993,7 @@ def map2alm_raw_2d(map, alm=None, ainfo=None, lmax=None, spin=[0,2], deriv=False
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread, convert_alm=adjoint)
 	minfo = analyse_geometry(map.shape, map.wcs)
 	# Restrict to lmax and mmax that ducc_2d allows. Higher ones will be ignored.
 	lmax  = min(ainfo.lmax, minfo.ducc_geo.lmax)
@@ -1025,7 +1025,7 @@ def map2alm_raw_cyl(map, alm=None, ainfo=None, lmax=None, spin=[0,2], weights=No
 		if copy and map is not None: map = map.copy()
 	else:
 		if copy and alm is not None: alm = alm.copy()
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread, convert_alm=adjoint)
 	map_full = utils.postflat(map_full, 2) # ducc wants just 1 pixel axis
 	rinfo    = get_ring_info   (map.shape, map.wcs)
 	kwargs   = {"theta":rinfo.theta, "nphi":rinfo.nphi, "phi0":rinfo.phi0,
@@ -1066,7 +1066,7 @@ def map2alm_raw_general(map, loc, alm=None, ainfo=None, lmax=None, spin=[0,2], w
 	if epsilon is None:
 		if map.dtype == np.float64: epsilon = 1e-10
 		else:                       epsilon = 1e-6
-	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread, pixdims=1)
+	alm_full, map_full, ainfo, nthread = prepare_raw(alm, map, ainfo=ainfo, lmax=lmax, deriv=deriv, nthread=nthread, pixdims=1, convert_alm=adjoint)
 	kwargs = {"loc":loc, "lmax":ainfo.lmax, "mmax":ainfo.mmax, "nthreads":nthread, "epsilon":epsilon, "mstart":ainfo.mstart, "epsilon": epsilon}
 	if weights is None: weights = np.ones(1)
 	def wmul(map, weights): return map*weights
@@ -1382,7 +1382,7 @@ def buffer2map(map, flip, pad):
 	map = flip_array(map, flip)
 	return map
 
-def prepare_alm(alm=None, ainfo=None, lmax=None, pre=(), dtype=np.float64):
+def prepare_alm(alm=None, ainfo=None, lmax=None, pre=(), dtype=np.float64, convert=False):
 	"""Set up alm and ainfo based on which ones of them are available."""
 	ctype = utils.complex_dtype(dtype)
 	if alm is None:
@@ -1393,11 +1393,13 @@ def prepare_alm(alm=None, ainfo=None, lmax=None, pre=(), dtype=np.float64):
 		alm = np.zeros(pre+(ainfo.nelem,), dtype=ctype)
 	if ainfo is None:
 		ainfo = alm_info(nalm=alm.shape[-1])
+	if not convert and alm.dtype != ctype:
+		raise ValueError("alm had dtype '%s', but expected '%s'" % (str(alm.dtype), str(ctype)))
 	alm = alm.astype(ctype, copy=False)
 	return alm, ainfo
 
-def prepare_raw(alm, map, ainfo=None, lmax=None, deriv=False, verbose=False, nthread=None, pixdims=2):
-	alm, ainfo = prepare_alm(alm, ainfo, lmax=lmax, pre=map.shape[:-pixdims], dtype=utils.native_dtype(map.dtype))
+def prepare_raw(alm, map, ainfo=None, lmax=None, deriv=False, verbose=False, nthread=None, pixdims=2, convert_alm=False):
+	alm, ainfo = prepare_alm(alm, ainfo, lmax=lmax, pre=map.shape[:-pixdims], dtype=utils.native_dtype(map.dtype), convert=convert_alm)
 	# Maybe this should be a part of map_info too
 	nthread  = int(utils.fallback(utils.getenv("OMP_NUM_THREADS", nthread),0))
 	# Massage to the shape the general ducc interface wants.
