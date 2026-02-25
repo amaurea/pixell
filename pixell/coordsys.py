@@ -105,7 +105,7 @@ def hor2equ(coords, ctime, site=None, weather=None):
 	q  = qp.azel2bore(az.reshape(-1), el.reshape(-1), None, None, lon=site.lon, lat=site.lat, ctime=ctime.reshape(-1))
 	# to proper quat and recover correct shape
 	q  = quaternion.as_quat_array(q)
-	q *= euler(2, psi+np.pi)
+	q *= euler(2, psi.reshape(-1)+np.pi)
 	q  = q.reshape(shape)
 	return Coords(q=q)
 

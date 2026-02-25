@@ -2310,7 +2310,7 @@ def pad(emap, pix, return_slice=False, wrap=False, value=0):
 		res[...,:,-pix[1,1]:] = res[...,:,pix[0,1]:pix[0,1]+pix[1,1]]
 	return (res,mslice) if return_slice else res
 
-def find_blank_edges(m, value="auto"):
+def find_blank_edges(m, value=0):
 	"""Returns blanks[{front,back},{y,x}], the size of the blank area
 	at the beginning and end of each axis of the map, where the argument
 	"value" determines which value is considered blank. Can be a float value,
@@ -2342,7 +2342,7 @@ def find_blank_edges(m, value="auto"):
 		blanks[1] = m.shape[-2:]-blanks[1]-1
 		return blanks
 
-def autocrop(m, method="plain", value="auto", margin=0, factors=None, return_info=False):
+def autocrop(m, method="plain", value=0, margin=0, factors=None, return_info=False):
 	"""Adjust the size of m to be more fft-friendly. If possible,
 	blank areas at the edge of the map are cropped to bring us to a nice
 	length. If there there aren't enough blank areas, the map is padded
