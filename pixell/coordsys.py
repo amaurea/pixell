@@ -279,17 +279,24 @@ def euler(axis, angle):
 	q     = quaternion.as_quat_array(q)
 	return q
 
+def rotation_phitheta(phi, theta, psi=0):
+	return euler(2, phi) * euler(1, theta) * euler(2, psi)
+
 def rotation_lonlat(lon, lat, psi=0):
 	return euler(2, lon) * euler(1, np.pi/2-lat) * euler(2, psi)
 
-def decompose_lonlat(q):
+def decompose_phitheta(q):
 	q = quaternion.as_float_array(q)
 	a, b, c, d = [q[...,i] for i in range(4)]
 	ab, cd, ac, bd = a*b, c*d, a*c, b*d
 	psi   = np.arctan2(ab+cd, ac-bd)
-	lon   = np.arctan2(cd-ab, ac+bd)
-	lat   = np.pi/2 - 2*np.arctan2((b**2+c**2)**0.5, (a**2+d**2)**0.5)
-	return lon, lat, psi
+	phi   = np.arctan2(cd-ab, ac+bd)
+	theta = 2*np.arctan2((b**2+c**2)**0.5, (a**2+d**2)**0.5)
+	return phi, theta, psi
+
+def decompose_lonlat(q):
+	lon, theta, psi = decompose_phitheta(q)
+	return lon, np.pi/2-theta, psi
 
 def rotation_xieta(xi, eta, gamma=0):
 	lon = np.arctan2(-xi, -eta)
