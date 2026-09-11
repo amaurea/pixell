@@ -288,6 +288,36 @@ def dict_lookup(dict, vals):
 	# Remap each using the dict
 	return np.array([dict[uval] for uval in uvals])[inds].reshape(vals.shape)
 
+def kmap(map, idict, strict=False):
+	"""Return idict with its keys replaced using map, which must implement
+	[] or (). If strict is False (the default), then keys not found in map
+	are kept as they are. Otherwise KeyError is raised for missing entries."""
+	if map is None and not strict: return idict
+	try: return {map(key):val for key,val in idict.items()}
+	except TypeError:
+		if strict: return {map[key]:val for key,val in idict.items()}
+		else: return {(map[key] if key in map else key):val for key,val in idict.items()}
+
+def vmap(map, vals, strict=False):
+	"""Remap the values in vals using the given map.
+	map: Must implement either () or []
+	vals: If list-like, the values are remapped and returned as a list.
+	  If a dict, returns a new dict with the values replaced using map
+	If strict is False (default) then values not in map will be kept
+	as they are. Otherwise, a KeyError is raised for missing entries.
+	"""
+	if map is None and not strict: return vals
+	if isinstance(vals, dict):
+		try: return {key:map(val) for key,val in vals.items()}
+		except TypeError:
+			if strict: return {key:map[val] for key,val in vals.items()}
+			else: return {key:(map[val] if val in map else val) for key,val in vals.items()}
+	else:
+		try: return [map(val) for val in vals]
+		except TypeError:
+			if strict: return [map[val] for val in vals]
+			else: return [(map[val] if val in map else val) for val in vals]
+
 def fallback(*args):
 	for arg in args:
 		if arg is not None: return arg
@@ -3185,6 +3215,11 @@ def unflatten_slice(sel, shape):
 	mgsel    = tuple([slice(0,n) for n in shape])
 	all_inds = np.mgrid[mgsel].reshape(len(shape),-1)
 	return tuple(all_inds[:,sel])
+
+def listslice(lst, sel):
+	"""Equivalent to lst[sel], except it works with numpy fancy indexing"""
+	try: return lst[sel]
+	except TypeError: return [lst[i] for i in np.arange(len(lst))[sel]]
 
 def outer_stack(arrays):
 	"""Example. outer_stack([[1,2,3],[10,20]]) -> [[[1,1],[2,2],[3,3]],[[10,20],[10,20],[10,2]]]"""

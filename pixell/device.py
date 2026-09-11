@@ -298,9 +298,9 @@ class ArrayPoolProxy(Mempool):
 			yield
 
 class ArrayMultipool:
-	def __init__(self, factory):
+	def __init__(self, factory, pools={}):
 		self.factory = factory
-		self.pools   = {}
+		self.pools   = pools
 	def want(self, *names):
 		pools = []
 		for name in names:
