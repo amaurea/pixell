@@ -116,6 +116,8 @@ def encode(val):
 		except (TypeError,AttributeError): return val
 	elif isinstance(val, str):
 		return val.encode()
+	elif isinstance(val, list):
+		return [encode(v) for v in val]
 	elif val is None:
 		return "__None__".encode()
 	else:

@@ -361,7 +361,10 @@ def parse_sys(desc):
 		"up":{"sys":"equ", "pos":[0,np.pi/2]},
 		"on":{"sys":None,  "pos":[0,0]},
 		"to":{"sys":None,  "pos":[0,0]},
-		# The fields below are somewhat hacky, and are only there to implement instrument-centered coordinates
+		# The fields below are somewhat hacky, and are only there to implement instrument-centered coordinates.
+		# They are only partially taken into account in coordsys.transform. The rest of the effect is applied
+		# in sogma.pmat.calc_pointing. I need to find a better abstraction. The one I use here has been stretched
+		# beyond comfort to support instrument-centered coordinates.
 		"inverse": False, # Centering on detector instead of object
 		"leak":    False, # Want pol-resp to unpol obj instead of unpol-resp to pol obj. No direct effect here
 		"postroll":False, # Want system after receiver roll, but before the mirrors. No direct effect here
