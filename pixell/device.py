@@ -318,6 +318,8 @@ class ArrayMultipool:
 			self.pools[name].reset()
 	def swap(self, name1, name2):
 		self.pools[name1].swap(self.pools[name2])
+	def items(self):
+		yield from self.pools.items()
 	def __getitem__(self, name):
 		"""Returns the memory pool with the given name, creating it if it doesn't exist"""
 		if name not in self.pools:

@@ -49,6 +49,18 @@ class SQL:
 		return derive(self.conn, query, tname=tname, aname=aname)
 	def close(self):
 		if self.own: self.conn.close()
+	def copy(self):
+		"""Return a memory-only copy of this database"""
+		res = SQL()
+		self.backup(res)
+		return res
+	def tomem(self):
+		"""Turn the db into a pure-memory one, closing any file connection"""
+		new_conn = sqlite3.connect(":memory:")
+		backup(self.conn, new_conn)
+		self.conn = new_conn
+		self.fname = ":memory:"
+		return self
 	def backup(self, other): backup(self, other)
 	def attach(self, other, name="other", mode="r"):
 		"""Context manager. Temporarily attaches other to us.
