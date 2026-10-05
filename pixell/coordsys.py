@@ -386,7 +386,7 @@ def parse_sys(desc):
 		if len(subs) != 2:
 			raise ValueError("Error parsing coordinate system description '%s'" % str(desc))
 		key, val = subs
-		# Implement "sidelobe" system, which is just a shortcut for hor+inverse
+		# Implement "sidelobe" system, which is just a shortcut for hor+inverse+postroll
 		if val == "sidelobe":
 			if key == "up":
 				val = "hor"

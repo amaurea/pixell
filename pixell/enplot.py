@@ -184,7 +184,7 @@ def plot_iterator(*arglist, **kwargs):
 			oname = args.oname.format(**oinfo)
 			# Draw the map
 			if args.driver.lower() == "pil":
-				img, info = draw_map_field(map_field, args, crange[:,gi*gsize:(gi+1)*gsize], return_info=True, return_layers=args.layers, printer=subprint, cache=cache)
+				img, info = draw_map_field(map_field, args, crange[:,gi*gsize:(gi+1)*gsize], return_info=True, return_layers=args.layers, printer=subprint, cache=cache, ifile=iname)
 				padding = np.array([-info.bounds[0,::-1],info.bounds[1,::-1]-map_field.shape[-2:]],dtype=int)
 				printer.write("padded by %d %d %d %d" % tuple(padding.reshape(-1)), 4)
 				typ = "vid" if is_vid else "pil"
@@ -496,10 +496,13 @@ def extract_stamps(map, args):
 
 def get_cache(cache, key, fun):
 	if cache is None: return fun()
-	if key not in cache: cache[key] = fun()
+	if key not in cache:
+		val, skip_cache = fun()
+		if skip_cache: return val
+		cache[key] = val
 	return cache[key]
 
-def draw_map_field(map, args, crange=None, return_layers=False, return_info=False, printer=noprint, cache=None):
+def draw_map_field(map, args, crange=None, return_layers=False, return_info=False, printer=noprint, cache=None, ifile=None):
 	"""Draw a single map field, resulting in a single image. Adds a coordinate grid
 	and lables as specified by args. If return_layers is True, an array will be
 	returned instead of an image, wich each entry being a component of the image,
@@ -528,20 +531,21 @@ def draw_map_field(map, args, crange=None, return_layers=False, return_info=Fals
 		with printer.time("draw annotations", 3):
 			def get_aimg():
 				annots = parse_annotations(args.annotate)
-				return draw_annotations(map, annots, args)
+				img, skip_cache = draw_annotations(map, annots, args, ifile=ifile)
+				return img, skip_cache
 			aimg = get_cache(cache, ("annotate",tag), get_aimg)
 			layers.append((aimg, [[0,0],aimg.size]))
 			names.append("annot")
 	# Coordinate grid
 	if args.grid % 2:
 		with printer.time("draw grid", 3):
-			ginfo = get_cache(cache, ("ginfo",tag), lambda: calc_gridinfo(map.shape, map.wcs, args))
-			grid  = get_cache(cache, ("grid", tag), lambda: draw_grid(ginfo, args))
+			ginfo = get_cache(cache, ("ginfo",tag), lambda: (calc_gridinfo(map.shape, map.wcs, args), False))
+			grid  = get_cache(cache, ("grid", tag), lambda: (draw_grid(ginfo, args), False))
 			layers.append(grid)
 			names.append("grid")
 		if not args.nolabels:
 			with printer.time("draw labels", 3):
-				labels, bounds = get_cache(cache, ("labels",tag), lambda: draw_grid_labels(ginfo, args))
+				labels, bounds = get_cache(cache, ("labels",tag), lambda: (draw_grid_labels(ginfo, args), False))
 				yoff = bounds[1][1]
 				layers.append((labels,bounds))
 				names.append("tics")
@@ -795,7 +799,7 @@ def parse_annotations(afile):
 			return [shlex.split(line) for line in f]
 	except (IOError, TypeError): return afile
 
-def draw_annotations(map, annots, args):
+def draw_annotations(map, annots, args, ifile=None):
 	"""Draw a set of annotations on the map. These are specified
 	as a list of ["type",param,param,...]. The recognized formats
 	are:
@@ -811,13 +815,18 @@ def draw_annotations(map, annots, args):
 	font_size_prev = 0
 	def topix(pos_off):
 		unit = utils.degree if not wcsutils.is_plain(map.wcs) else 1.0
-		pix = map.sky2pix(np.array([float(w) for w in pos_off[:2]])*unit)
+		# Allow us to pass nan for lat to get a pure pixel coordinate with no
+		# coordinate lookup
+		if    pos_off[0].lower() == "nan": pix = np.zeros(2)
+		else: pix = map.sky2pix(np.array([float(w) for w in pos_off[:2]])*unit)
 		pix += np.array([float(w) for w in pos_off[2:]])
 		return pix[::-1].astype(int)
 	def skippable(x,y):
 		rmax = args.annotate_maxrad
 		if rmax == 0: return False
 		return x <= -rmax or y <= -rmax or x >= map.shape[-1]-1+rmax or y >= map.shape[-2]-1+rmax
+	field_dict  = build_annot_dict(map, args, ifile=ifile)
+	used_format = False
 	for annot in annots:
 		atype = annot[0].lower()
 		color = "black"
@@ -848,21 +857,48 @@ def draw_annotations(map, annots, args):
 				if y2 < y1: y1,y2 = y2,y1
 				for i in range(width):
 					draw.rectangle((x1+i,y1+i,x2-i,y2-i), outline=color)
-		elif atype in ["t", "text"]:
+		elif atype in ["t", "text", "tl", "textl", "tr", "textr"]:
+			if   atype.endswith("l"): align = "left"
+			elif atype.endswith("r"): align = "right"
+			else:                     align = "center"
 			x,y  = topix(annot[1:5])
 			if skippable(x,y): continue
-			text = annot[5]
+			text0= annot[5]
+			text = text0.format(**field_dict)
+			if text != text0: used_format = True
 			size = 16
 			if len(annot) > 6: size  = int(annot[6])
 			if len(annot) > 7: color = annot[7]
 			if font is None or size != font_size_prev:
 				font = cgrid.get_font(size)
 				font_size_prev = size
-			tbox = font.getbbox(text)[-2:]
-			draw.text((x-tbox[0]/2, y-tbox[1]/2), text, color, font=font)
+			tbox = np.array(font.getbbox(text)[-2:])
+			if   align == "left":  toff = tbox*0
+			elif align == "right": toff = -tbox
+			else:                  toff = tbox/2
+			draw.text((x-toff[0], y-toff[1]), text, color, font=font)
 		else:
 			raise NotImplementedError
-	return img
+	return img, used_format
+
+def build_annot_dict(map, args, ifile=None):
+	fields = {
+		"w": map.shape[-2],
+		"h": map.shape[-1],
+	}
+	fields.update(args)
+	# Fetch extra header fields, beyond what's in wcs
+	if ifile is not None and ifile.endswith(".fits"):
+		header = enmap.read_fits_header(ifile)
+		# fits header fields are always uppercase. We register this
+		# with the raw value from the header, and a lowercase version
+		# of the key with a lowercase version of the header value
+		for key in header:
+			val = header[key]
+			fields[key] = val
+			if isinstance(val, str): val = val.lower()
+			fields[key.lower()] = val
+	return fields
 
 def standardize_images(tuples):
 	"""Given a list of (img,bounds), composite them on top of each other
