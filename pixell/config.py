@@ -131,7 +131,9 @@ def to_str():
 	be loaded by from_str."""
 	res = ""
 	for name in parameters:
-		res += "\n".join(["# " + line for line in textwrap.wrap(parameters[name]["desc"])]) + "\n"
+		desc = parameters[name]["desc"]
+		if desc is None: res += "\n"
+		else: res += "\n".join(["# " + line for line in textwrap.wrap(desc)]) + "\n"
 		res += "%s = %s\n" % (name, repr(parameters[name]["value"]))
 		res += "\n"
 	return res

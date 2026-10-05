@@ -2196,6 +2196,7 @@ def find_equal_groups_fast(vals):
 
 	Groups will be returned in ascending order of val.
 	"""
+	vals  = np.asanyarray(vals)
 	order = np.argsort(vals, kind="stable")
 	uvals, edges = np.unique(vals[order], return_index=True)
 	edges = np.concatenate([edges,[len(vals)]])
@@ -2212,6 +2213,7 @@ def find_similar_groups_fast(vals, tol=0):
 	* biggest:  vals[order[edges[1:]-1]]
 	* median:   vals[order[(edges[:-1]+edges[1:]-1)//2]]
 	"""
+	vals  = np.asanyarray(vals)
 	order = np.argsort(vals, kind="stable")
 	vsort = vals[order]
 	diffs = np.diff(vsort)
@@ -2730,9 +2732,9 @@ def tsz_tform(r200=1*arcmin, l=None, lmax=40000, xc=0.497, alpha=1.0, beta=-4.65
 
 ### Binning ####
 
-def edges2bins(edges):
+def edges2bins(edges, dtype=int):
 	edges = np.asarray(edges)
-	res = np.zeros((edges.size-1,2),int)
+	res = np.zeros((edges.size-1,2),dtype=dtype)
 	res[:,0] = edges[:-1]
 	res[:,1] = edges[1:]
 	return res
