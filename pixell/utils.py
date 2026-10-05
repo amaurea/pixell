@@ -2196,6 +2196,7 @@ def find_equal_groups_fast(vals):
 
 	Groups will be returned in ascending order of val.
 	"""
+	vals  = np.asanyarray(vals)
 	order = np.argsort(vals, kind="stable")
 	uvals, edges = np.unique(vals[order], return_index=True)
 	edges = np.concatenate([edges,[len(vals)]])

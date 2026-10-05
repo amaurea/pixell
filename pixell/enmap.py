@@ -1266,7 +1266,8 @@ def modrmap(shape, wcs, ref="center", safe=True, corner=False):
 	(default), then sharp coordinate edges will be avoided."""
 	slmap = posmap(shape,wcs,safe=safe,corner=corner)
 	if isinstance(ref,basestring):
-		if ref=="center": ref = center(shape,wcs)
+		if   ref=="center": ref = center(shape,wcs)
+		elif ref=="origo ": ref = [0,0]
 		else:             raise ValueError
 	ref = np.array(ref)[:,None,None]
 	if wcsutils.is_plain(wcs): return np.sum((slmap-ref)**2,0)**0.5
