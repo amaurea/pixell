@@ -3182,13 +3182,9 @@ def split_slice_simple(sel, ndims):
 		raise IndexError("Too many indices")
 	return [tuple(v) for v in res]
 
-class _get_slice_class:
-	def __getitem__(self, a): return a
-get_slice = _get_slice_class()
-
 def parse_slice(desc):
 	if desc is None: return None
-	else: return eval("get_slice" + desc)
+	else: return eval("np.s_" + desc)
 
 def slice_downgrade(d, s, axis=-1):
 	"""Slice array d along the specified axis using the Slice s,
