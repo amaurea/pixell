@@ -904,6 +904,8 @@ def nearest_product(n, factors, direction="below"):
 	of the factors that's <= to n. If direction = "above", calculate the
 	smallest product thats >= n. Vectorized over n. Scales as O(len(n)*log(max(n)))"""
 	below = direction == "below"
+	n = np.asanyarray(n)
+	if n.size == 0: return n
 	if below: vmax = np.max(n)+1
 	else:     vmax = np.max(n)*np.min(factors)
 	# Generate all possible products
