@@ -322,6 +322,9 @@ float * measure_rmax(int nobj, float * amaxs, int * prof_ids, int * prof_ns, flo
 		// this loop could use that to reduce the loop range for the individual objects.
 		int i = prof_info ? prof_info_lookup(prof_info, pid, vrel)-1 : n-1;
 		for(; i > 0 && fabsf(vs[i]) < vrel; i--);
+		// i is now the last element above threshold. Rmax can be up to one bin bigger than
+		// this due to linear interpolation, so add 1 if possible
+		if(i < n-1) i += 1;
 		rmaxs[oi] = rs[i];
 		if(rmax > 0) rmaxs[oi] = fminf(rmaxs[oi], rmax);
 	}
