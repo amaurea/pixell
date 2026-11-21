@@ -275,12 +275,13 @@ ProfInfo * build_prof_info(int nprof, int * prof_ns, float ** prof_vs) {
 		prof_info->offs[i*prof_levels+0] = 1;
 		// The last level just goes all the way out to the end
 		prof_info->offs[i*prof_levels+prof_levels-1] = prof_ns[i];
-		// Populate the others by inwards from the edge
+		// Populate the others by inwards from the edge.
 		int ri = prof_ns[i]-1;
 		for(int li = prof_levels-2; li > 0; li--) {
 			float vlim = vmax * powf(prof_base, -li);
 			for(; ri > imax && fabsf(prof_vs[i][ri]) < vlim; ri--);
-			prof_info->offs[i*prof_levels+li] = ri;
+			// +1 because we need context for linear interpolation
+			prof_info->offs[i*prof_levels+li] = ri+1;
 		}
 	}
 	return prof_info;
@@ -326,31 +327,6 @@ float * measure_rmax(int nobj, float * amaxs, int * prof_ids, int * prof_ns, flo
 	}
 	return rmaxs;
 }
-
-// This old version did not support profiles that chance sign or start at zero
-/*
-float * measure_rmax(int nobj, float * amaxs, int * prof_ids, int * prof_ns, float ** prof_rs, float ** prof_vs, float vmin, float rmax) {
-	float * rmaxs = calloc(nobj, sizeof(float));
-	#pragma omp parallel for
-	for(int oi = 0; oi < nobj; oi++) {
-		int pid    = prof_ids[oi];
-		int n      = prof_ns[pid];
-		float * rs = prof_rs[pid];
-		float * vs = prof_vs[pid];
-		float vrel = vmin/amaxs[oi];
-		if     (vs[0]   <  vrel) rmaxs[oi] = 0;
-		else if(vs[n-1] >= vrel) rmaxs[oi] = rs[n-1];
-		else {
-			int i;
-			for(i = n-1; i > 0 && vs[i] < vrel; i--);
-			rmaxs[oi] = rs[i];
-			if(rmax > 0) rmaxs[oi] = fminf(rmaxs[oi], rmax);
-		}
-	}
-	return rmaxs;
-}
-*/
-
 
 int assign_cells(
 		int nobj,         // Number of objects

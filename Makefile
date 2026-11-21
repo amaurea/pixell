@@ -1,4 +1,4 @@
-.PHONY: clean clean-test clean-pyc clean-build docs help develop build inline
+.PHONY: clean clean-test clean-pyc clean-build docs help develop build build_debug inline debug
 .DEFAULT_GOAL := develop
 
 define BROWSER_PYSCRIPT
@@ -36,7 +36,7 @@ help:
 	@$(python) -c "$$PRINT_HELP_PYSCRIPT" < $(MAKEFILE_LIST)
 
 clean:
-	rm -rf build dist .eggs .coverage htmlcov .pytest_cache
+	rm -rf build build_debug dist .eggs .coverage htmlcov .pytest_cache
 	make clean -C cython
 	make clean -C fortran
 	find . -name '*.pyc' -delete
@@ -90,3 +90,12 @@ build/build.ninja:
 	rm -rf build
 	mkdir build
 	meson setup build
+
+debug: build_debug
+	(shopt -s nullglob; cd pixell; rm -f *.so; ln -s ../build_debug/*.so ../build_debug/*.dylib .)
+build_debug: build_debug/build.ninja
+	(cd build_debug; meson compile -v)
+build_debug/build.ninja:
+	rm -rf build_debug
+	mkdir build_debug
+	meson setup build_debug --buildtype=debug

@@ -51,7 +51,7 @@ add_project_arguments('-Wno-conversion', language : 'fortran')
 fortran_sources = {
     'fortran/interpol_32.f90': '_interpol_32',
     'fortran/interpol_64.f90': '_interpol_64',
-    'fortran/colorize.f90': '_colorize',
+    'fortran/pcolorize.f90':    '_pcolorize',
     'fortran/array_ops_32.f90': '_array_ops_32',
     'fortran/array_ops_64.f90': '_array_ops_64',
 }

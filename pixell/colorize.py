@@ -1,7 +1,7 @@
 # Transform from real numbers to RGB colors.
 import numpy as np, time
 has_fortran = True
-try: from . import _colorize
+try: from . import _pcolorize
 except ImportError: has_fortran = False
 try: basestring
 except NameError: basestring = str
@@ -116,7 +116,7 @@ schemes["plasma"] = Colorscheme("0.000:0c0786,0.004:100787,0.008:130689,0.012:15
 
 def colorize_scalar_fortran(a, desc):
 	res = np.empty((len(a),4),dtype=np.uint16)
-	_colorize.remap(a, res.T, desc.vals, desc.cols.astype(np.int16).T)
+	_pcolorize.remap(a, res.T, desc.vals, desc.cols.astype(np.int16).T)
 	return res.astype(np.uint8)
 
 def colorize_scalar_python(a, desc):
@@ -150,12 +150,12 @@ def colorize_direct_python(a, desc):
 
 def colorize_direct_fortran(a, desc):
 	res = np.empty((a.shape[1],4),dtype=np.uint16)
-	_colorize.direct(a.T, res.T)
+	_pcolorize.direct(a.T, res.T)
 	return res.astype(np.uint8)
 
 def colorize_direct_colorcap_fortran(a, desc):
 	res = np.empty((a.shape[1],4),dtype=np.uint16)
-	_colorize.direct_colorcap(a.T, res.T)
+	_pcolorize.direct_colorcap(a.T, res.T)
 	return res.astype(np.uint8)
 
 def to_mpl_colormap(name, data=None):
